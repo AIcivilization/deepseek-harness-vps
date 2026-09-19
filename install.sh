@@ -147,18 +147,30 @@ install_node_cn() {
 }
 
 step2_node() {
-	log "步骤 2/9：Node.js 22"
+	log "步骤 2/9：Node.js 22 + pnpm"
 	local major
 	major=$(node --version 2>/dev/null | sed -n 's/^v\{0,1\}\([0-9]\{1,\}\).*/\1/p' || true)
 	if [[ "${major:-0}" -ge 22 ]]; then
 		log "已安装 Node $(node --version)，跳过"
-		return
+	else
+		apt-get update -y >/dev/null
+		if [[ "$MIRROR" == "cn" ]]; then install_node_cn; else install_node_nodesource; fi
+		major=$(node --version | sed -n 's/^v\{0,1\}\([0-9]\{1,\}\).*/\1/p')
+		[[ "${major:-0}" -ge 22 ]] || die "Node.js 22 安装失败"
+		log "Node $(node --version) 安装完成"
 	fi
-	apt-get update -y >/dev/null
-	if [[ "$MIRROR" == "cn" ]]; then install_node_cn; else install_node_nodesource; fi
-	major=$(node --version | sed -n 's/^v\{0,1\}\([0-9]\{1,\}\).*/\1/p')
-	[[ "${major:-0}" -ge 22 ]] || die "Node.js 22 安装失败"
-	log "Node $(node --version) 安装完成"
+
+	# pnpm：`dsh plugin` 管理插件依赖的包管理器（/setup 向导可选安装插件需要）
+	if ! command -v pnpm >/dev/null 2>&1; then
+		log "安装 pnpm（插件管理需要）"
+		if [[ "$MIRROR" == "cn" ]]; then
+			npm install -g pnpm --registry=https://registry.npmmirror.com >/dev/null 2>&1 \
+				|| npm install -g pnpm >/dev/null 2>&1 || true
+		else
+			npm install -g pnpm >/dev/null 2>&1 || true
+		fi
+	fi
+	command -v pnpm >/dev/null 2>&1 || warn "pnpm 未安装，插件安装功能不可用（可稍后 npm i -g pnpm）"
 }
 
 ## endregion

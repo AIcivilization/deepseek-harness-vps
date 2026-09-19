@@ -44,6 +44,12 @@ const SETUP_MAX_FAILURES = 10;
 const CADDY_ADMIN = process.env.CADDY_ADMIN || "http://127.0.0.1:2019";
 const CADDY_SITE_FILE = process.env.CADDY_SITE_FILE || "/etc/caddy/dsh-site.conf";
 const DEEPSEEK_KEY_REF = "DEEPSEEK_API_KEY"; // DSH 约定：deriveKeyRef("deepseek")
+// /setup 向导可选的常用插件（package 名即 `dsh plugin --profile web add <pkg>` 的入参）
+const PLUGIN_OPTIONS = [
+	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题（推荐）" },
+	{ id: "dsh-cost-meter", pkg: "dsh-cost-meter", name: "会话费用统计 dsh-cost-meter", desc: "本会话/当日/历史费用与额度显示" },
+	{ id: "dsh-context", pkg: "dsh-context", name: "上下文洞察 dsh-context", desc: "查看当前上下文构成与演进" },
+];
 const DOMAIN_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
 const SCRYPT_KEYLEN = 64;
@@ -855,6 +861,59 @@ function writeAdminRecord(username, password) {
 	fs.writeFileSync(adminPath(), JSON.stringify(record, null, 2), { mode: 0o600 });
 }
 
+/** 以 DSH 子命令运行（如 `plugin --profile web add <pkg>`），返回 { code, stdout, stderr }。 */
+function runDshCli(cmdArgs, timeoutMs = 5 * 60_000) {
+	return new Promise((resolve) => {
+		const child = spawn(process.execPath, [DSH_BIN, ...cmdArgs], {
+			cwd: GATE_HOME,
+			env: { ...process.env },
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stdout = "";
+		let stderr = "";
+		let done = false;
+		const finish = (code) => {
+			if (done) return;
+			done = true;
+			resolve({ code, stdout, stderr });
+		};
+		child.stdout.on("data", (c) => { stdout += c; });
+		child.stderr.on("data", (c) => { stderr += c; });
+		child.on("error", (err) => finish(128));
+		child.on("exit", (code) => finish(code === null ? 128 : code));
+		const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+		timer.unref();
+	});
+}
+
+/**
+ * 后台安装一批常用插件（不阻塞向导响应）。
+ * `dsh plugin` 内部转发给 pnpm；装完置空 token 触发一次 DSH 重启，让新 bundle 进入 profile 生效。
+ */
+async function installPlugins(packages) {
+	let installed = 0;
+	for (const pkg of packages) {
+		log(`installing plugin: ${pkg}`);
+		const res = await runDshCli(["plugin", "--profile", "web", "add", pkg]);
+		if (res.code === 0) {
+			installed += 1;
+			log(`plugin installed: ${pkg}`);
+		} else {
+			const tail = (res.stderr || res.stdout || "").trim().split("\n").slice(-4).join(" | ");
+			log(`plugin install failed for ${pkg}: code=${res.code}${tail ? ` | ${tail}` : ""}`);
+			if (/pnpm not found/i.test(res.stderr || "")) {
+				log("hint: install pnpm first (`npm install -g pnpm`), or re-run install.sh");
+				break; // 后续插件同样会因缺 pnpm 失败，不再逐个重试
+			}
+		}
+	}
+	if (installed > 0 && dsh.child) {
+		log("restarting dsh to load newly installed plugins");
+		dsh.token = null; // 强制网关在重启后重新捕获 token + 兑换
+		dsh.child.kill("SIGTERM");
+	}
+}
+
 // 向导限流（内存）：同 IP 10 次 / 10 分钟
 const setupFailures = new Map();
 
@@ -909,6 +968,9 @@ button:hover{background:#1d4fd8}
 .warn{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#2a2112;color:#fbbf24;font-size:13px}
 .hint{margin:2px 0 0;font-size:12px;color:#5c6b7e}
 hr{border:0;border-top:1px solid #1f2733;margin:20px 0 4px}
+.chk{display:flex;align-items:flex-start;gap:8px;margin:14px 0 2px;cursor:pointer;font-size:14px;color:#dbe2ea}
+.chk input{width:auto;margin:2px 0 0;accent-color:#2563eb}
+.chk .tip{margin:2px 0 0;font-size:12px;color:#5c6b7e}
 </style>
 </head>
 <body>
@@ -932,7 +994,11 @@ ${(warnings || []).map((w) => `<p class="warn">${esc(w)}</p>`).join("")}
 <p class="hint">需已将 A 记录解析到本服务器；留空则沿用当前访问方式。Caddy 自动签发证书。</p>
 <label for="k">DeepSeek API Key（可选）</label>
 <input id="k" name="apiKey" type="password" autocomplete="off" placeholder="sk-...">
-<p class="hint">现在填写将直接写入 DSH；跳过则可稍后在原生设置页填写。</p>
+<p class="hint">现在填写最省事；跳过也可稍后在登录后的「添加 API Key」引导，或设置 → 模型 → DeepSeek 中填写。</p>
+<hr>
+<p class="hint" style="margin:2px 0 0">常用插件（可选，安装后自动重启 DSH 生效）</p>
+${PLUGIN_OPTIONS.map((o, i) => `
+<label class="chk"><input type="checkbox" name="plugin" value="${o.id}"${i === 0 ? " checked" : ""}> <span>${esc(o.name)}<br><span class="tip">${esc(o.desc)}</span></span></label>`).join("")}
 <button type="submit">完成设置</button>
 </form>
 </main>
@@ -970,6 +1036,10 @@ async function handleSetup(req, res) {
 	const password2 = String(form.get("password2") || "");
 	const domain = String(form.get("domain") || "").trim().toLowerCase();
 	const apiKey = String(form.get("apiKey") || "").trim();
+	const plugins = (form.getAll("plugin") || [])
+		.map((v) => PLUGIN_OPTIONS.find((o) => o.id === v || o.pkg === v))
+		.filter(Boolean)
+		.map((o) => o.pkg);
 
 	const redisplay = (error) => {
 		recordSetupFailure(ip);
@@ -1010,6 +1080,11 @@ async function handleSetup(req, res) {
 
 	fs.writeFileSync(setupLockPath(), JSON.stringify({ completedAt: Date.now(), username }, null, 2), { mode: 0o600 });
 	log("setup completed; wizard locked");
+
+	if (plugins.length) {
+		log(`setup: installing plugins in background: ${plugins.join(", ")}`);
+		installPlugins(plugins).catch((err) => log(`plugin install aborted: ${err && err.message}`));
+	}
 
 	if (warnings.length) {
 		sendHtml(res, 200, setupPage({ warnings, username, domain }));
