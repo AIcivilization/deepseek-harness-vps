@@ -1,0 +1,12 @@
+{
+  "latest_verified": "0.1.5-rc.2",
+  "updated_at": "2026-09-19",
+  "versions": [
+    {
+      "dsh": "0.1.5-rc.2",
+      "min_gate": "0.1.0",
+      "verified_at": "2026-09-19",
+      "notes": "M1-M3 全流程实测通过（登录/特权 RPC/WebSocket/向导/域名变更/升级自检）"
+    }
+  ]
+}

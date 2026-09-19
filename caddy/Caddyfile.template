@@ -1,0 +1,10 @@
+# dsh-vps 主 Caddyfile（由 install.sh 生成）
+#
+# TLS 由 Caddy 自动处理（Let's Encrypt / ZeroSSL，自动续期）；WebSocket 透传零配置。
+# Host 头原样传递 —— 这是 dsh-gate 透明代理的要求（DSH 围栏白名单按 Host 匹配）。
+#
+# 站点块单独放在 dsh-site.conf，由 dsh-vps 管理：
+#   - install.sh 写入初始站点块（--domain 有则域名块，无则 :443 自签过渡）
+#   - 浏览器向导改域名后，gate 重写该文件并经 Caddy admin API（127.0.0.1:2019）热加载
+
+import /etc/caddy/dsh-site.conf

@@ -1,0 +1,26 @@
+# dsh-vps systemd unit 模板
+# install.sh 将 __NODE_BIN__ 替换为实际 node 路径后安装到 /etc/systemd/system/dsh-gate.service
+#
+# 只有一个服务：gate 以父进程身份 spawn 并管理 DSH 子进程（捕获 stdout launchToken 所必需）。
+# 运行环境变量（GATE_HOME / DSH_BIN / DSH_HOME / DSH_TRUSTED_HOST）集中在
+# /opt/dsh-vps/state/gate.env —— 向导(M3)改域名时只需重写 gate.env 并
+# `systemctl restart dsh-gate`，unit 本身保持静态（见设计文档 4.4）。
+
+[Unit]
+Description=dsh-vps login gateway (manages DeepSeek Harness)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dsh
+EnvironmentFile=/opt/dsh-vps/state/gate.env
+ExecStart=__NODE_BIN__ /opt/dsh-vps/gate/server.js
+Restart=always
+RestartSec=2
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

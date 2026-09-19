@@ -1,0 +1,12 @@
+# 测试产物与本地状态（不入库）
+m1-test/
+m3-test/
+state/
+*.log
+cj*.txt
+
+# 设计文档留在本地
+dsh-vps-architecture-design.md
+
+# 系统文件
+.DS_Store
