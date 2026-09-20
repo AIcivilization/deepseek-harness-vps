@@ -17,8 +17,7 @@ DSH 的特权接口（设置读写、API Key 写入等 `/api` RPC）受"浏览�
 - **一键安装**：`curl | bash`，唯一可选参数 `--domain`
 - **登录门**：scrypt 口令 + HMAC 会话 Cookie + 登录限流
 - **浏览器初始向导**：填用户名/密码（+ 可选域名、DeepSeek API Key），全程无需 SSH 敲命令
-- **两款插件已捆绑**：[@goodandready/dsh-subscriptions](https://github.com/GooDAnDReaDY/dsh-subscriptions)（订阅 OAuth 接入）与 [@linxin666/dsh-client-ui-task-board](https://github.com/zhu1090093659/dsh-web/tree/main/packages/dsh-task-board)（任务看板）随向导一并安装，无需选择
-- **常用插件可选装**：另有 dsh-market 插件市场、费用统计、上下文洞察三款，勾选即自动安装
+- **社区插件可选装**：向导内置 5 款，默认全选、可取消：dsh-market 插件市场、[dsh-subscriptions](https://github.com/GooDAnDReaDY/dsh-subscriptions)（订阅 OAuth 接入）、[dsh-task-board](https://github.com/zhu1090093659/dsh-web/tree/main/packages/dsh-task-board)（任务看板）、费用统计、上下文洞察
 - **自动 HTTPS**：Caddy 自动签发/续期证书；向导里改域名即时热加载
 - **100% 原生界面**：零注入、零魔改，DSH 升级只需换版本号
 - **安全升级**：版本钉住 + 备份 + 升级后回归自检 + 失败自动回滚 + 秒级手动回滚
@@ -53,10 +52,10 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 安装完成后浏览器打开输出的地址，自动进入初始设置向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与常用插件 → 登录即用。API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
-向导提交后，两个捆绑插件会在后台安装（约几十秒），装完 DSH 自动重启生效：
+插件在后台安装（约几十秒），装完 DSH 自动重启生效。两款的用处：
 
-- **订阅接入 dsh-subscriptions**：设置 → 插件 → Subscriptions 里绑定 ChatGPT / Claude / Grok / Kimi / GLM 等订阅账户，之后即可当作模型提供方使用，不必烧按量付费额度。
-- **任务看板 dsh-task-board**：左侧栏 Task Board 入口直接使用，支持真实执行会话与定时调度。
+- **dsh-subscriptions**：设置 → 插件 → Subscriptions 里绑定 ChatGPT / Claude / Grok / Kimi / GLM 等订阅账户，之后即可当作模型提供方使用，不必烧按量付费额度。
+- **dsh-task-board**：左侧栏 Task Board 入口直接使用，支持真实执行会话与定时调度。
 
 ### 管理命令
 
@@ -110,8 +109,7 @@ DSH's privileged interfaces (settings, API key storage, all `/api` RPCs) are pro
 - **One-command install**: `curl | bash`, single optional flag `--domain`
 - **Login gate**: scrypt password + HMAC session cookie + rate limiting
 - **Browser setup wizard**: username/password (+ optional domain & DeepSeek API key) — no SSH commands needed
-- **Two plugins bundled**: [@goodandready/dsh-subscriptions](https://github.com/GooDAnDReaDY/dsh-subscriptions) (subscription OAuth bridge) and [@linxin666/dsh-client-ui-task-board](https://github.com/zhu1090093659/dsh-web/tree/main/packages/dsh-task-board) (task board) are installed with the wizard, no opt-in
-- **Optional common plugins**: dsh-market plugin marketplace, cost meter, and context inspector — check to auto-install
+- **Optional community plugins**: the wizard ships 5, all pre-checked and uncheckable: dsh-market marketplace, [dsh-subscriptions](https://github.com/GooDAnDReaDY/dsh-subscriptions) (subscription OAuth bridge), [dsh-task-board](https://github.com/zhu1090093659/dsh-web/tree/main/packages/dsh-task-board) (task board), cost meter, context inspector
 - **Automatic HTTPS**: Caddy issues/renews certificates; domain changes from the wizard hot-reload instantly
 - **100% native UI**: zero injection, zero patches; upgrading DSH is just a version bump
 - **Safe upgrades**: pinned versions + backup + post-upgrade self-check + automatic rollback on failure
@@ -133,7 +131,7 @@ Add `--mirror cn` if you're behind the GFW (npm via npmmirror). Without `--domai
 
 After installation, open the printed URL — the setup wizard starts automatically: admin username/password → (optional) domain, DeepSeek API key & common plugins → log in. Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
 
-The two bundled plugins install in the background afterwards (tens of seconds) and DSH restarts to activate them:
+The selected plugins install in the background afterwards (tens of seconds) and DSH restarts to activate them. Two of them worth knowing:
 
 - **dsh-subscriptions**: Settings → Plugins → Subscriptions to bind ChatGPT / Claude / Grok / Kimi / GLM accounts, then use them as model providers instead of burning pay-as-you-go credits.
 - **dsh-task-board**: available from the Task Board entry in the sidebar, with real session execution and cron scheduling.
