@@ -13,7 +13,7 @@ One-click bare-metal deployment of [DeepSeek Harness](https://github.com/deepsee
 - **一键安装**：`curl | bash`，装完即服务化运行（systemd 托管，开机自启）
 - **登录门**：scrypt 口令 + HMAC 会话 Cookie + 登录限流，公网访问先过这道门
 - **浏览器初始向导**：管理员账号、域名、DeepSeek API Key、社区插件，全程在浏览器里填完
-- **社区插件一键装**：向导内置 5 款，默认全选、可取消，后台安装完自动重启生效
+- **社区插件一键装**：向导内置 6 款，默认全选、可取消，后台安装完自动重启生效
 - **自动 HTTPS**：Caddy 自动签发并续期证书；向导里改域名即时热加载
 - **公网可用的原生设置页**：设置、模型、API Key、权限策略在公网域名下照常读写
 - **插件市场可用**：市场里浏览/安装插件，点「立即重启」直接生效
@@ -49,10 +49,11 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 安装完成打开输出的地址，自动进入初始设置向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与社区插件 → 登录即用。API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
-勾选的插件在后台安装（约几十秒），装完 DSH 自动重启生效。其中两款：
+勾选的插件在后台安装（约几十秒），装完 DSH 自动重启生效。其中三款：
 
 - **dsh-subscriptions**：设置 → 插件 → Subscriptions 里绑定 ChatGPT / Claude / Grok / Kimi / GLM 等订阅账户，之后即可当作模型提供方使用，省下按量付费额度
 - **dsh-task-board**：左侧栏 Task Board 入口直接使用，支持真实执行会话与定时调度
+- **dsh-im**：设置 → IM机器人 里扫码或填凭据，把飞书 / 钉钉 / 企微 / QQ / Slack / Telegram 等 11 种 IM 机器人接进 Harness
 
 ### 管理命令
 
@@ -91,7 +92,7 @@ DSH 与网关均只绑 127.0.0.1，用户浏览器接触不到 DSH 的会话 Coo
 - **One-command install**: `curl | bash`, then it runs as a systemd service, started on boot
 - **Login gate**: scrypt password + HMAC session cookie + rate limiting, in front of every public request
 - **Browser setup wizard**: admin account, domain, DeepSeek API key and community plugins — all filled in from the browser
-- **One-click community plugins**: 5 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart
+- **One-click community plugins**: 6 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart
 - **Automatic HTTPS**: Caddy issues and renews certificates; changing the domain in the wizard hot-reloads instantly
 - **Native settings on a public domain**: settings, models, API keys and permission policies read and write normally
 - **Working plugin marketplace**: browse and install plugins from the marketplace, and "restart now" just works
@@ -127,10 +128,11 @@ Removes the service, install directory, Caddy site block and the DSH data direct
 
 Open the printed URL after installation — the setup wizard starts automatically: admin username/password → (optional) domain, DeepSeek API key & community plugins → log in. Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
 
-The checked plugins install in the background (tens of seconds) and DSH restarts to activate them. Two worth knowing:
+The checked plugins install in the background (tens of seconds) and DSH restarts to activate them. Three worth knowing:
 
 - **dsh-subscriptions**: Settings → Plugins → Subscriptions to bind ChatGPT / Claude / Grok / Kimi / GLM accounts, then use them as model providers and save pay-as-you-go credits
 - **dsh-task-board**: available from the Task Board entry in the sidebar, with real session execution and cron scheduling
+- **dsh-im**: Settings → IM机器人 to scan a QR code or enter credentials, wiring 11 IM channels (Feishu, DingTalk, WeCom, QQ, Slack, Telegram and more) into Harness
 
 ### Management
 

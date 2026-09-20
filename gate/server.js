@@ -49,6 +49,7 @@ const PLUGIN_OPTIONS = [
 	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题（推荐）" },
 	{ id: "dsh-subscriptions", pkg: "@goodandready/dsh-subscriptions", name: "订阅接入 dsh-subscriptions", desc: "把 ChatGPT / Claude / Grok / Kimi / GLM 等 16 家订阅经 OAuth 桥接为 LLM 提供方，多账户池轮换" },
 	{ id: "dsh-task-board", pkg: "@linxin666/dsh-client-ui-task-board", name: "任务看板 dsh-task-board", desc: "Web 端任务看板，可真实执行会话、按 Host cron 定时调度" },
+	{ id: "dsh-im", pkg: "@xmanrui/dsh-im", args: ["-w"], name: "IM 接入 dsh-im", desc: "飞书 / 钉钉 / 企微 / QQ / Slack / Telegram 等 11 种 IM 机器人接入 Harness（设置 → IM机器人）" },
 	{ id: "dsh-cost-meter", pkg: "dsh-cost-meter", name: "会话费用统计 dsh-cost-meter", desc: "本会话/当日/历史费用与额度显示" },
 	{ id: "dsh-context", pkg: "dsh-context", name: "上下文洞察 dsh-context", desc: "查看当前上下文构成与演进" },
 ];
@@ -1131,11 +1132,13 @@ function runDshCli(cmdArgs, timeoutMs = 5 * 60_000) {
  * 后台安装一批常用插件（不阻塞向导响应）。
  * `dsh plugin` 内部转发给 pnpm；装完置空 token 触发一次 DSH 重启，让新 bundle 进入 profile 生效。
  */
-async function installPlugins(packages) {
+async function installPlugins(options) {
 	let installed = 0;
-	for (const pkg of packages) {
+	for (const opt of options) {
+		const pkg = opt.pkg;
 		log(`installing plugin: ${pkg}`);
-		const res = await runDshCli(["plugin", "--profile", "web", "add", pkg]);
+		// -w 等附加参数由插件作者的安装命令指定，dsh 原样透传给 pnpm
+		const res = await runDshCli(["plugin", "--profile", "web", "add", ...(opt.args || []), pkg]);
 		if (res.code === 0) {
 			installed += 1;
 			log(`plugin installed: ${pkg}`);
@@ -1276,8 +1279,7 @@ async function handleSetup(req, res) {
 	const plugins = (form.getAll("plugin") || [])
 		.map((v) => PLUGIN_OPTIONS.find((o) => o.id === v || o.pkg === v))
 		.filter(Boolean)
-		.map((o) => o.pkg)
-		.filter((pkg, i, arr) => arr.indexOf(pkg) === i);
+		.filter((o, i, arr) => arr.findIndex((x) => x.pkg === o.pkg) === i);
 
 	const redisplay = (error) => {
 		recordSetupFailure(ip);
@@ -1320,7 +1322,7 @@ async function handleSetup(req, res) {
 	log("setup completed; wizard locked");
 
 	if (plugins.length) {
-		log(`setup: installing plugins in background: ${plugins.join(", ")}`);
+		log(`setup: installing plugins in background: ${plugins.map((o) => o.pkg).join(", ")}`);
 		installPlugins(plugins).catch((err) => log(`plugin install aborted: ${err && err.message}`));
 	}
 
