@@ -5,7 +5,8 @@
 # 子命令：
 #   status              服务状态 + 健康 + 版本提示
 #   restart             重启 gate（DSH 子进程随之重启并自动重新兑换）
-#   upgrade [version]   升级到已验证版本（默认 latest_verified）；--latest 强上 npm 最新版
+#   upgrade [version]   升级 DSH 版本（默认 latest_verified）；--latest 强上 npm 最新版
+#   update-gate        更新 gate 代码本身（gate/server.js）并重启
 #   rollback            符号链接切回上一版本并重启
 #   reset-admin         删除 admin.json 与 setup.lock，重新走向导（应急）
 #   backup              打包 DSH_HOME + state 到 backups/（保留最近 3 份）
@@ -46,6 +47,41 @@ cmd_backup() {
 	local old
 	old=$(ls -1t "$ROOT"/backups/dsh-vps-*.tar.gz 2>/dev/null | tail -n +4)
 	[[ -n "$old" ]] && rm -f $old && log "已清理旧备份"
+}
+
+## endregion
+
+## region: update-gate
+
+# 安装目录不是 git 仓库（install.sh 从 RAW_BASE 取文件），所以 gate 代码
+# 只能靠重新拉取更新。upgrade 管 DSH 版本，update-gate 管 gate 自身代码。
+cmd_update_gate() {
+	require_root
+	[[ -f "$ROOT/gate/server.js" ]] || die "未找到 $ROOT/gate/server.js（不是 dsh-vps 安装目录？）"
+	local tmp="$ROOT/gate/server.js.new"
+	log "拉取最新 gate/server.js ($RAW_BASE/gate/server.js)"
+	curl -fsSL --max-time 30 "$RAW_BASE/gate/server.js" -o "$tmp" \
+		|| { rm -f "$tmp"; die "拉取失败（离线？或 DSHVPS_RAW_BASE 指向有误）"; }
+	node --check "$tmp" \
+		|| { rm -f "$tmp"; die "新版本语法检查失败，原文件未改动"; }
+	if cmp -s "$tmp" "$ROOT/gate/server.js"; then
+		rm -f "$tmp"
+		log "gate 已是最新版本，无需更新"
+		return 0
+	fi
+	cp -p "$ROOT/gate/server.js" "$ROOT/gate/server.js.bak" && log "已备份旧版: $ROOT/gate/server.js.bak"
+	mv "$tmp" "$ROOT/gate/server.js"
+	chmod 644 "$ROOT/gate/server.js"
+	log "重启 $SERVICE ..."
+	systemctl restart "$SERVICE"
+	sleep 3
+	if curl -fsS --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
+		log "更新完成，gate 已就绪"
+	else
+		warn "重启后健康检查未通过：journalctl -u $SERVICE -n 50"
+		warn "回滚：cp $ROOT/gate/server.js.bak $ROOT/gate/server.js && systemctl restart $SERVICE"
+		return 1
+	fi
 }
 
 ## endregion
@@ -261,8 +297,9 @@ dsh-vps 管理命令
 用法: sudo dsh-vps <子命令>
   status              服务状态 + 健康 + 版本提示
   restart             重启 gate（DSH 随之重启并重新兑换会话）
-  upgrade [version]   升级到已验证版本；--latest [--yes] 强上 npm 最新版
-  rollback            切回上一版本（秒级，不依赖网络）
+  upgrade [version]   升级 DSH 版本；--latest [--yes] 强上 npm 最新版
+  update-gate         更新 gate 自身代码（gate/server.js）并重启
+  rollback            切回上一 DSH 版本（秒级，不依赖网络）
   reset-admin [--yes] 删除管理员与向导锁，重新走初始设置
   backup              备份数据到 /opt/dsh-vps/backups/（保留 3 份）
   selfcheck           手动触发回归自检探针
@@ -273,6 +310,7 @@ case "${1:-}" in
 status) cmd_status ;;
 restart) cmd_restart ;;
 upgrade) shift; cmd_upgrade "$@" ;;
+update-gate) cmd_update_gate ;;
 rollback) cmd_rollback ;;
 reset-admin) shift; cmd_reset_admin "$@" ;;
 backup) cmd_backup ;;

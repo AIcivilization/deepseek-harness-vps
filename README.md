@@ -44,8 +44,9 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 ```bash
 sudo dsh-vps status        # 服务状态 + 健康 + 版本提示
 sudo dsh-vps restart       # 重启（DSH 随之重启并自动重新兑换会话）
-sudo dsh-vps upgrade       # 升级到已验证版本（备份 → 自检 → 失败自动回滚）
-sudo dsh-vps rollback      # 切回上一版本
+sudo dsh-vps upgrade       # 升级 DSH 到已验证版本（备份 → 自检 → 失败自动回滚）
+sudo dsh-vps update-gate   # 更新 gate 自身代码并重启（安装目录非 git 仓库，无需 git pull）
+sudo dsh-vps rollback      # 切回上一 DSH 版本
 sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置
 sudo dsh-vps backup        # 备份数据（保留最近 3 份）
 ```
@@ -108,8 +109,9 @@ After installation, open the printed URL — the setup wizard starts automatical
 ```bash
 sudo dsh-vps status        # service status + health + version hints
 sudo dsh-vps restart       # restart (DSH restarts and re-exchanges its session)
-sudo dsh-vps upgrade       # upgrade to the latest verified version (backup → self-check → auto rollback)
-sudo dsh-vps rollback      # switch back to the previous version
+sudo dsh-vps upgrade       # upgrade DSH to the latest verified version (backup → self-check → auto rollback)
+sudo dsh-vps update-gate   # update the gateway code itself and restart (no git repo on the VPS)
+sudo dsh-vps rollback      # switch back to the previous DSH version
 sudo dsh-vps reset-admin   # emergency reset if you lose the admin password
 sudo dsh-vps backup        # back up data (keeps the latest 3)
 ```
