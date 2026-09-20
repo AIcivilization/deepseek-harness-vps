@@ -1,51 +1,88 @@
+<div align="center">
+
 # deepseek-harness-vps
 
-在 VPS 上一键裸机部署 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）：无 Docker，浏览器里填几个空，即可 7×24 通过公网使用官方原生的 DSH Web 界面。
+<p><strong>把 DeepSeek Harness 装进你的 VPS：一条命令，公网可达，界面原样</strong></p>
+<p><strong>Your DeepSeek Harness on your own VPS — one command, reachable from anywhere, native UI intact</strong></p>
 
-One-click bare-metal deployment of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) on a VPS: no Docker, a few fields in your browser, and the stock DSH web interface is yours to use from anywhere, 24/7.
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/deepseek-harness-vps" alt="MIT 许可证"></a>
+  <img src="https://img.shields.io/badge/platform-Ubuntu%2022.04%2B%20%2F%20Debian%2012%2B-blue" alt="平台：Ubuntu 22.04+ / Debian 12+">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.2-4176E6" alt="DeepSeek Harness 0.1.5-rc.2">
+  <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="运行时依赖：0">
+  <img src="https://img.shields.io/badge/Docker-not%20required-orange" alt="无需 Docker">
+  <img src="https://img.shields.io/github/stars/AIcivilization/deepseek-harness-vps?style=social" alt="star">
+</p>
+
+<p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
+
+</div>
 
 ---
 
-## 中文
+## 简介
 
-### 它能做什么
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）默认只认本机浏览器：它的特权接口（设置、API Key、插件管理）受浏览器信任围栏保护，直接反代到公网后这些页面全部失效。
 
-- **一键安装**：`curl | bash`，装完即服务化运行（systemd 托管，开机自启）
-- **登录门**：scrypt 口令 + HMAC 会话 Cookie + 登录限流，公网访问先过这道门
-- **浏览器初始向导**：管理员账号、域名、DeepSeek API Key、社区插件，全程在浏览器里填完
-- **社区插件一键装**：向导内置 6 款，默认全选、可取消，后台安装完自动重启生效
-- **自动 HTTPS**：Caddy 自动签发并续期证书；向导里改域名即时热加载
-- **公网可用的原生设置页**：设置、模型、API Key、权限策略在公网域名下照常读写
-- **插件市场可用**：市场里浏览/安装插件，点「立即重启」直接生效
-- **会话自愈**：DSH 首启与插件安装需要几十秒，页面自动等待，就绪后自动进入
-- **安全升级**：DSH 版本钉在已验证清单内，升级走备份 → 自检 → 失败自动回滚，也可随时手动回滚
-- **可观测与可恢复**：`/gate/health` 直接给出崩溃原因与连续崩溃次数；`dsh-vps backup` 保留最近 3 份备份
+dsh-vps 用一个零运行时依赖的登录网关（dsh-gate）架在 DSH 前面：公网请求先过 scrypt 登录门，再由网关以服务端身份完成 DSH 会话认证并透传。你在任何地方打开浏览器，用的都是官方原版的 DSH Web 界面，设置、模型、API Key、插件市场该有的都有。
 
-### 环境要求
+DeepSeek Harness (DSH) trusts the operator's own browser only: its privileged interfaces — settings, API keys, plugin management — sit behind a browser-trust fence, and a plain reverse proxy to the public internet leaves those pages dead.
+
+dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public requests pass a scrypt login gate first, then the gateway performs DSH session authentication server-side and proxies the rest. You open a browser anywhere and get the stock DSH web interface — settings, models, API keys and the plugin marketplace all working.
+
+---
+
+## 能力一览
+
+| 能力 | 说明 |
+| --- | --- |
+| 一键安装 | `curl \| bash`，装完即 systemd 托管、开机自启 |
+| 登录门 | scrypt 口令 + HMAC 会话 Cookie + 登录限流 |
+| 浏览器初始向导 | 管理员账号、域名、DeepSeek API Key、社区插件，全程在浏览器里填完 |
+| 社区插件一键装 | 向导内置 6 款，默认全选、可取消，后台装完自动重启生效 |
+| 自动 HTTPS | Caddy 自动签发并续期证书；向导里改域名即时热加载 |
+| 公网可用的原生设置页 | 设置、模型、API Key、权限策略在公网域名下照常读写 |
+| 插件市场可用 | 市场里浏览/安装插件，点「立即重启」直接生效 |
+| 会话自愈 | DSH 首启与插件安装需要几十秒，页面自动等待，就绪后自动进入 |
+| 安全升级 | DSH 版本钉在已验证清单内，升级走备份 → 自检 → 失败自动回滚，也可随时手动回滚 |
+| 可观测与可恢复 | `/gate/health` 直接给出崩溃原因与连续崩溃次数；`dsh-vps backup` 保留最近 3 份 |
+
+---
+
+## 环境要求
 
 - Ubuntu 22.04+ / Debian 12+（root）
 - 2C2G 以上，端口 80/443 开放
-- 有域名更佳（自动 HTTPS）；没有也能先用 IP + 自签证书
+- 有域名即可自动 HTTPS；暂无域名也能先用公网 IP + 自签证书
 
-### 安装
+---
+
+## 安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com
 ```
 
-> 国内网络加 `--mirror cn`（npm 走 npmmirror）：`sudo bash -s -- --domain dsh.example.com --mirror cn`
+国内网络加 `--mirror cn`（Node 与 DSH 走 npmmirror）：
 
-### 卸载
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
+  | sudo bash -s -- --domain dsh.example.com --mirror cn
+```
+
+## 卸载
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh \
   | sudo bash -s -- --yes
 ```
 
-删除服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份到 `/root/dsh-vps-uninstall-<时间戳>.tar.gz`。`--keep-data` 保留 DSH 数据，`--purge-caddy` 连 Caddy 一起移除。
+删除服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份到 `/root/dsh-vps-uninstall-<时间戳>.tar.gz`。`--keep-data` 保留 DSH 数据，`--purge-caddy` 连 Caddy 一起移除。卸载完再跑安装命令即为全新环境。
 
-### 首次使用
+---
+
+## 首次使用
 
 安装完成打开输出的地址，自动进入初始设置向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与社区插件 → 登录即用。API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
@@ -55,7 +92,9 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 - **dsh-task-board**：左侧栏 Task Board 入口直接使用，支持真实执行会话与定时调度
 - **dsh-im**：设置 → IM机器人 里扫码或填凭据，把飞书 / 钉钉 / 企微 / QQ / Slack / Telegram 等 11 种 IM 机器人接进 Harness
 
-### 管理命令
+---
+
+## 管理命令
 
 ```bash
 sudo dsh-vps status        # 服务状态 + 健康 + 版本提示
@@ -63,12 +102,15 @@ sudo dsh-vps restart       # 重启（DSH 随之重启并自动重新兑换会�
 sudo dsh-vps upgrade       # 升级 DSH 到已验证版本（备份 → 自检 → 失败自动回滚）
 sudo dsh-vps update-gate   # 拉取并重启网关自身代码（安装目录非 git 仓库，无需 git pull）
 sudo dsh-vps ownshost on   # 应用设置页可用性补丁（公网域名下恢复设置页）
+sudo dsh-vps selfcheck     # 跑一遍回归自检（登录 / RPC / WebSocket / 会话）
 sudo dsh-vps rollback      # 切回上一 DSH 版本
 sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置
 sudo dsh-vps backup        # 备份数据（保留最近 3 份）
 ```
 
-### 运行机制
+---
+
+## 运行机制
 
 ```
 浏览器 ──HTTPS──▶ Caddy ──▶ dsh-gate(:3100, 仅回环) ──▶ dsh web(:3080, 仅回环)
@@ -85,85 +127,20 @@ DSH 与网关均只绑 127.0.0.1，用户浏览器接触不到 DSH 的会话 Coo
 
 ---
 
-## English
+## 仓库内容
 
-### What it does
-
-- **One-command install**: `curl | bash`, then it runs as a systemd service, started on boot
-- **Login gate**: scrypt password + HMAC session cookie + rate limiting, in front of every public request
-- **Browser setup wizard**: admin account, domain, DeepSeek API key and community plugins — all filled in from the browser
-- **One-click community plugins**: 6 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart
-- **Automatic HTTPS**: Caddy issues and renews certificates; changing the domain in the wizard hot-reloads instantly
-- **Native settings on a public domain**: settings, models, API keys and permission policies read and write normally
-- **Working plugin marketplace**: browse and install plugins from the marketplace, and "restart now" just works
-- **Self-healing startup**: the first boot and plugin installs take tens of seconds; the page waits and enters on its own
-- **Safe upgrades**: DSH is pinned to a verified version list; upgrades go backup → self-check → automatic rollback on failure, plus manual rollback at any time
-- **Observable and recoverable**: `/gate/health` reports the crash reason and crash streak; `dsh-vps backup` keeps the latest 3 copies
-
-### Requirements
-
-- Ubuntu 22.04+ / Debian 12+ (root)
-- 2 vCPU / 2 GB RAM or better; ports 80/443 open
-- A domain is recommended (automatic HTTPS); IP + self-signed cert works too
-
-### Install
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
-  | sudo bash -s -- --domain dsh.example.com
-```
-
-Add `--mirror cn` if you're behind the GFW (npm via npmmirror).
-
-### Uninstall
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh \
-  | sudo bash -s -- --yes
-```
-
-Removes the service, install directory, Caddy site block and the DSH data directory, packing a backup to `/root/dsh-vps-uninstall-<timestamp>.tar.gz` first. `--keep-data` keeps the DSH data, `--purge-caddy` removes Caddy as well.
-
-### First run
-
-Open the printed URL after installation — the setup wizard starts automatically: admin username/password → (optional) domain, DeepSeek API key & community plugins → log in. Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
-
-The checked plugins install in the background (tens of seconds) and DSH restarts to activate them. Three worth knowing:
-
-- **dsh-subscriptions**: Settings → Plugins → Subscriptions to bind ChatGPT / Claude / Grok / Kimi / GLM accounts, then use them as model providers and save pay-as-you-go credits
-- **dsh-task-board**: available from the Task Board entry in the sidebar, with real session execution and cron scheduling
-- **dsh-im**: Settings → IM机器人 to scan a QR code or enter credentials, wiring 11 IM channels (Feishu, DingTalk, WeCom, QQ, Slack, Telegram and more) into Harness
-
-### Management
-
-```bash
-sudo dsh-vps status        # service status + health + version hints
-sudo dsh-vps restart       # restart (DSH restarts and re-exchanges its session)
-sudo dsh-vps upgrade       # upgrade DSH to the latest verified version (backup → self-check → auto rollback)
-sudo dsh-vps update-gate   # pull and restart the gateway code itself (no git repo on the VPS)
-sudo dsh-vps ownshost on   # apply the settings-page patch (restores settings on a public domain)
-sudo dsh-vps rollback      # switch back to the previous DSH version
-sudo dsh-vps reset-admin   # emergency reset if you lose the admin password
-sudo dsh-vps backup        # back up data (keeps the latest 3)
-```
-
-### How it runs
-
-```
-Browser ──HTTPS──▶ Caddy ──▶ dsh-gate(:3100, loopback only) ──▶ dsh web(:3080, loopback only)
-                              login gate + transparent proxy      stock DSH
-                              + server-side DSH cookie injection
-```
-
-Both DSH and the gateway bind to 127.0.0.1 only, the user's browser never sees DSH's session cookie, and every request is proxied through after the gateway authenticates it.
-
-- **Self-healing startup**: during first boot and plugin installs the page shows "DeepSeek Harness 正在启动", polls health every 3s and reloads itself as soon as the session is ready.
-- **Settings availability**: DSH's frontend decides "is this the operator's own browser" from the page hostname and hides settings on a public domain. The gateway serves the officially supported `__DSH_TRANSPORT__.ownsHost` declaration alongside the page, which restores settings, models, API keys and permission policies. `--trusted-host` only opens the network fence — the two are separate gates.
-- **Marketplace restart**: "restart now" is handled by the gateway — it strips Caddy's `X-Forwarded-For` (which trips DSH's loopback check and 403s) and restarts the DSH child process it owns, keeping session exchange intact.
-- **Troubleshooting entry points**: `sudo ss -ltnp | grep 3080` finds stale DSH processes; `/gate/health` reports `lastError`, `lastExit` and `crashStreak` directly.
+| 文件 | 作用 |
+| --- | --- |
+| `install.sh` | 一键安装入口（唯一可选参数 `--domain`、`--mirror cn`） |
+| `uninstall.sh` | 卸载并备份 |
+| `bin/dsh-vps` | 运维命令行 |
+| `gate/server.js` | 登录网关（Node 原生，零依赖） |
+| `caddy/Caddyfile.template` | Caddy 主配置 |
+| `units/dsh-gate.service` | systemd 单元模板 |
+| `versions.json` | DSH 已验证版本清单 |
 
 ---
 
-## License
+## 许可
 
-MIT
+[MIT](LICENSE)
