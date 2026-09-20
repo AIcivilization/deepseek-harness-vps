@@ -76,6 +76,8 @@ const FORWARDING_HEADERS = new Set(["forwarded", "x-forwarded-for", "x-real-ip"]
 // 在 gate 之外拉起一个新的 DSH 进程，抢占 3080 端口，gate 的子进程随后
 // EADDRINUSE 且再也抓不到 launchToken → 永久"会话尚未就绪"。
 const MARKET_RESTART_PATHS = new Set(["/dsh-market/restart", "/dsh-market/restart/"]);
+// 设 GATE_TAKEOVER_RESTART=0 则放行给 DSH 自己处理（会退回到上面那个坑，仅供对照排障）
+const TAKEOVER_RESTART = process.env.GATE_TAKEOVER_RESTART !== "0";
 
 // 逐跳头：代理时重建，不透传（请求侧 transfer-encoding 由 node 自动处理）
 const HOP_HEADERS = new Set([
@@ -661,63 +663,6 @@ function handleHealth(req, res) {
 }
 
 /**
- * gate 侧兜底：直接写 DeepSeek API Key（credentials/set），不依赖原生设置页。
- * 用途：设置页因任何原因不可用时，仍有一条不受浏览器信任判定影响的通道。
- */
-async function handleGateKey(req, res) {
-	const page = (message, kind) => `<!doctype html><meta charset="utf-8"><title>dsh-vps · API Key</title>
-<meta name="robots" content="noindex">
-<body style="background:#0b0e14;color:#dbe2ea;font:15px/1.7 system-ui,-apple-system,'Segoe UI',sans-serif;padding:40px;max-width:520px">
-<h2 style="margin:0 0 16px">写入 DeepSeek API Key</h2>
-${message ? `<p style="padding:10px 12px;border-radius:8px;background:${kind === "err" ? "#2a1215;color:#f87171" : "#101c2e;color:#93c5fd"};font-size:13px">${esc(message)}</p>` : ""}
-<form method="post" action="/gate/key">
-<label style="display:block;margin:12px 0 4px;font-size:13px;color:#9aa7b8" for="k">API Key（sk-...）</label>
-<input id="k" name="apiKey" type="password" autocomplete="off" placeholder="sk-..." style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #2a3547;border-radius:8px;background:#0d1219;color:#e6edf5;font-size:15px">
-<button type="submit" style="margin-top:18px;padding:9px 16px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:15px;cursor:pointer">写入</button>
-</form>
-<p style="color:#5c6b7e;font-size:12px;margin:18px 0 0">写入走服务端特权通道（credentials/set），明文不落 gate 任何文件。留空提交可查看当前是否已配置。</p>
-<p style="margin:10px 0 0"><a href="/" style="color:#60a5fa;font-size:13px">返回 DeepSeek Harness</a></p></body>`;
-
-	if (req.method === "GET" || req.method === "HEAD") {
-		sendHtml(res, 200, page(""));
-		return;
-	}
-	if (req.method !== "POST") {
-		sendText(res, 405, "method not allowed");
-		return;
-	}
-	let form;
-	try {
-		form = new URLSearchParams(await readBody(req, 64 * 1024));
-	} catch {
-		sendText(res, 400, "bad request");
-		return;
-	}
-	const apiKey = String(form.get("apiKey") || "").trim();
-	try {
-		await waitForDshCookie(30_000);
-	} catch (err) {
-		sendHtml(res, 503, page(`DSH 会话尚未就绪：${err.message}`, "err"));
-		return;
-	}
-	try {
-		if (!apiKey) {
-			const info = await dshRpc("credentials/describe", { refs: [DEEPSEEK_KEY_REF] });
-			const list = Array.isArray(info) ? info : [];
-			const found = list.find((c) => c && c.ref === DEEPSEEK_KEY_REF);
-			sendHtml(res, 200, page(found && found.present ? "当前已配置 API Key（未改动）。" : "当前未配置 API Key。"));
-			return;
-		}
-		await dshRpc("credentials/set", { ref: DEEPSEEK_KEY_REF, value: apiKey });
-		log("api key written via /gate/key");
-		sendHtml(res, 200, page("已写入 DeepSeek API Key。"));
-	} catch (err) {
-		log(`/gate/key failed: ${err.message}`);
-		sendHtml(res, 502, page(`写入失败：${err.message}`, "err"));
-	}
-}
-
-/**
  * DSH 会话尚未就绪（DSH 还在启动，或 token 兑换/端口出了问题）。
  * 页面自己轮询 /gate/health，一旦会话就绪立即刷新；同时把阻塞原因直接摆在页面上，
  * 免得用户只能去翻 journalctl。
@@ -862,9 +807,11 @@ function proxyHttp(req, res) {
 				}
 				respHeaders[key] = value;
 			}
-			// HTML 文档：注入 ownsHost 声明，让设置页在公网域名下同样可用（见文件头说明）
-			if (isHtml && OWNS_HOST_INJECT) {
-				collectAndInject(upRes, res, upRes.statusCode || 502, respHeaders);
+			// HTML 文档：注入 ownsHost 声明，让设置页在公网域名下同样可用（见文件头说明）。
+			// 只对导航型 GET/HEAD 的 200 响应改写；其余（含任何流式响应）一律 pipe 直通。
+			const navigational = req.method === "GET" || req.method === "HEAD";
+			if (OWNS_HOST_INJECT && isHtml && navigational && upRes.statusCode === 200) {
+				collectAndInject(upRes, res, upRes.statusCode, respHeaders);
 				return;
 			}
 			res.writeHead(upRes.statusCode || 502, respHeaders);
@@ -966,25 +913,6 @@ function setupOpen() {
 
 /** 服务端身份调用 DSH 特权 RPC（走已注入的会话 Cookie，等价于"登录态探测"）。 */
 function dshRpc(method, args) {
-	const dotted = method.replace(/\//g, ".");
-	const candidates = [
-		{ path: `/api/${method}`, method },
-		// 上游若改为 "命名空间 + 点号方法名" 的路由形状，退回到 /api/<ns>
-		{ path: `/api/${dotted.split(".")[0]}`, method: dotted },
-	];
-	return rpcAttempt(candidates, 0, args);
-}
-
-function rpcAttempt(candidates, index, args) {
-	if (index >= candidates.length) return Promise.reject(new Error(`rpc ${candidates[0].method} failed (all endpoint shapes)`));
-	const { path, method } = candidates[index];
-	return rpcOnce(path, method, args).catch((err) => {
-		if (/rpc http 404|rpc http 400|not found/i.test(String(err && err.message))) return rpcAttempt(candidates, index + 1, args);
-		throw err;
-	});
-}
-
-function rpcOnce(path, method, args) {
 	return new Promise((resolve, reject) => {
 		if (!dsh.cookie) {
 			reject(new Error("dsh session not ready"));
@@ -997,7 +925,7 @@ function rpcOnce(path, method, args) {
 				host: DSH_HOST,
 				port: DSH_PORT,
 				method: "POST",
-				path,
+				path: `/api/${method}`,
 				headers: {
 					host: dshTrustedHost,
 					"content-type": "application/json",
@@ -1484,8 +1412,7 @@ function main() {
 					denyUnauthenticated(req, res, pathname);
 					return;
 				}
-				if (pathname === "/gate/key") return handleGateKey(req, res);
-				if (MARKET_RESTART_PATHS.has(pathname)) return handleMarketRestart(req, res);
+				if (TAKEOVER_RESTART && MARKET_RESTART_PATHS.has(pathname)) return handleMarketRestart(req, res);
 				proxyHttp(req, res);
 			})
 			.catch((err) => {

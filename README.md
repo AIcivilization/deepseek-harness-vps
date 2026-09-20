@@ -55,9 +55,16 @@ sudo dsh-vps backup        # 备份数据（保留最近 3 份）
 
 - **启动页会自动恢复**：DSH 首次启动（含插件安装）需要几十秒，此时页面显示"DeepSeek Harness 正在启动"并按 3 秒一次自检，会话就绪后自动刷新，无需手动操作。
 - **设置页为什么能用**：DSH 前端按页面 hostname 判断"是否操作者本机浏览器"，公网域名下会禁用设置。gate 在返回的 HTML 里注入官方支持的 `__DSH_TRANSPORT__.ownsHost` 声明恢复该能力；`--trusted-host` 只负责打开网络围栏，两者不是一回事。可用 `GATE_OWNS_HOST=0` 关闭注入。
-- **插件市场的「立即重启」由 gate 接管**：官方实现会自行拉起新 DSH 进程，会脱离 gate 的父子关系并抢占 3080 端口，导致会话兑换永久失败。gate 拦截该端点、自己重启 DSH 子进程，前端随即自动 reload。
-- **API Key 兜底通道**：若原生设置页因任何原因不可用，登录后访问 `/gate/key` 可直接写入 DeepSeek API Key（走服务端特权通道）。
+- **插件市场的「立即重启」由 gate 接管**：Caddy 的 `X-Forwarded-For` 会触发 DSH 的"仅限直连回环"校验（403），gate 转发前剥掉该头；同时官方重启会自行拉起新 DSH 进程，脱离 gate 的父子关系并抢占 3080，导致会话兑换永久失败，所以由 gate 拦下该端点自己重启子进程。
 - **疑似端口被占**：`sudo ss -ltnp | grep 3080` 查到残留 DSH 进程后 kill，再 `systemctl restart dsh-gate`；`/gate/health` 会直接给出 `lastError` / `lastExit` / `crashStreak`。
+
+以上三处行为都可在 `state/gate.env` 里单独关掉，改完 `systemctl restart dsh-gate` 即回退到官方原生行为，无需改代码：
+
+```bash
+GATE_OWNS_HOST=0         # 不注入 ownsHost（退回"设置页不可用"）
+GATE_STRIP_FORWARDING=0  # 不剥离 X-Forwarded-For / X-Real-IP / Forwarded
+GATE_TAKEOVER_RESTART=0  # 不接管 dsh-market 的重启端点
+```
 
 ### 架构速览
 
@@ -130,8 +137,9 @@ Both DSH and the gateway bind to 127.0.0.1 only; the user's browser never sees D
 
 - **Startup is self-healing**: the first DSH boot (including plugin installs) takes tens of seconds. During that window the page shows "DeepSeek Harness 正在启动", polls health every 3s and reloads itself as soon as the session is ready.
 - **Why settings work**: DSH's frontend decides "is this the operator's own browser" from the page hostname, which disables settings on a public domain. The gateway injects the officially supported `__DSH_TRANSPORT__.ownsHost` declaration into the served HTML to restore it; `--trusted-host` only opens the network fence — the two are separate gates. Disable with `GATE_OWNS_HOST=0`.
-- **The marketplace "restart now" is handled by the gateway**: stock dsh-market relaunches DSH itself, which escapes the gateway's parent/child relationship and steals port 3080, permanently breaking session exchange. The gateway intercepts that endpoint and restarts its own DSH child instead; the frontend reloads automatically.
-- **API key fallback**: if the native settings page is ever unavailable, visit `/gate/key` after login to write the DeepSeek API key through the server-side privileged channel.
+- **The marketplace "restart now" is handled by the gateway**: Caddy's `X-Forwarded-For` trips DSH's "same-origin loopback only" check (403), so the gateway strips that header before proxying; and stock dsh-market relaunches DSH itself, which escapes the gateway's parent/child relationship and steals port 3080, permanently breaking session exchange — so the gateway intercepts the endpoint and restarts its own child instead.
+
+Each of the three behaviours above can be turned off individually in `state/gate.env` (then `systemctl restart dsh-gate`) to fall back to stock DSH behaviour without touching code: `GATE_OWNS_HOST=0`, `GATE_STRIP_FORWARDING=0`, `GATE_TAKEOVER_RESTART=0`.
 - **Suspected port conflict**: `sudo ss -ltnp | grep 3080`, kill the stale DSH process, then `systemctl restart dsh-gate`. `/gate/health` reports `lastError`, `lastExit` and `crashStreak` directly.
 
 ---
