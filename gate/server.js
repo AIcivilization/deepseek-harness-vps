@@ -63,7 +63,13 @@ const SCRYPT_KEYLEN = 64;
 // gate 作为已认证的本地代理注入该声明，即可让设置页/填 Key/权限策略全部恢复。
 // 设 GATE_OWNS_HOST=0 可关闭注入（退回"设置页不可用"的官方默认行为）。
 const OWNS_HOST_INJECT = process.env.GATE_OWNS_HOST !== "0";
-const OWNS_HOST_SNIPPET = '<script>window.__DSH_TRANSPORT__={ownsHost:true}</script>';
+// 与 bin/dsh-vps 的 ownshost 补丁共用同一标记：改前端静态文件是主机制，
+// 这里的代理改写只是补丁缺失时的兜底，两者互相识别、绝不重复注入。
+const OWNS_HOST_MARK = "dsh-vps:ownshost";
+const OWNS_HOST_SNIPPET =
+	`<script data-dsh-vps="ownshost">/* ${OWNS_HOST_MARK} */` +
+	"window.__DSH_TRANSPORT__=Object.assign(window.__DSH_TRANSPORT__||{},{ownsHost:true});</script>";
+let ownshostLogged = false;
 
 // DSH 的若干特权端点（dsh-market 的 restart / backup 导出 / self-uninstall）要求
 // "直连回环"：只要出现 x-forwarded-for / x-real-ip / forwarded 任一头，
@@ -759,11 +765,18 @@ function collectAndInject(upRes, res, status, respHeaders) {
 			res.end();
 			return;
 		}
-		// 只有完整的 HTML 文档才改写；找不到 <head> 说明不是文档（片段/JSON 误标），原样转发
-		const at = body.search(/<head\b[^>]*>/i);
-		if (at !== -1) {
-			const end = body.indexOf(">", at) + 1;
-			body = body.slice(0, end) + OWNS_HOST_SNIPPET + body.slice(end);
+		// 静态文件补丁（bin/dsh-vps ownshost on）已经在页面里时不再重复注入
+		if (!body.includes(OWNS_HOST_MARK)) {
+			// 只有完整的 HTML 文档才改写；找不到 <head> 说明不是文档（片段/JSON 误标），原样转发
+			const at = body.search(/<head\b[^>]*>/i);
+			if (at !== -1) {
+				const end = body.indexOf(">", at) + 1;
+				body = body.slice(0, end) + OWNS_HOST_SNIPPET + body.slice(end);
+				if (!ownshostLogged) {
+					ownshostLogged = true;
+					log("injected ownsHost by proxy (静态文件补丁未生效，建议 sudo dsh-vps ownshost on)");
+				}
+			}
 		}
 		const payload = Buffer.from(body, "utf8");
 		res.writeHead(status, { ...respHeaders, "content-length": payload.byteLength });

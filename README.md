@@ -59,6 +59,7 @@ sudo dsh-vps status        # 服务状态 + 健康 + 版本提示
 sudo dsh-vps restart       # 重启（DSH 随之重启并自动重新兑换会话）
 sudo dsh-vps upgrade       # 升级 DSH 到已验证版本（备份 → 自检 → 失败自动回滚）
 sudo dsh-vps update-gate   # 更新 gate 自身代码并重启（安装目录非 git 仓库，无需 git pull）
+sudo dsh-vps ownshost on   # 设置页可用性补丁（公网域名下解除"设置在此浏览器中不可用"）
 sudo dsh-vps rollback      # 切回上一 DSH 版本
 sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置
 sudo dsh-vps backup        # 备份数据（保留最近 3 份）
@@ -71,12 +72,13 @@ sudo dsh-vps backup        # 备份数据（保留最近 3 份）
 - **插件市场的「立即重启」由 gate 接管**：Caddy 的 `X-Forwarded-For` 会触发 DSH 的"仅限直连回环"校验（403），gate 转发前剥掉该头；同时官方重启会自行拉起新 DSH 进程，脱离 gate 的父子关系并抢占 3080，导致会话兑换永久失败，所以由 gate 拦下该端点自己重启子进程。
 - **疑似端口被占**：`sudo ss -ltnp | grep 3080` 查到残留 DSH 进程后 kill，再 `systemctl restart dsh-gate`；`/gate/health` 会直接给出 `lastError` / `lastExit` / `crashStreak`。
 
-以上三处行为都可在 `state/gate.env` 里单独关掉，改完 `systemctl restart dsh-gate` 即回退到官方原生行为，无需改代码：
+后面两处可在 `state/gate.env` 里单独关掉，改完 `systemctl restart dsh-gate` 即回退到官方原生行为，无需改代码：
 
 ```bash
-GATE_OWNS_HOST=0         # 不注入 ownsHost（退回"设置页不可用"）
 GATE_STRIP_FORWARDING=0  # 不剥离 X-Forwarded-For / X-Real-IP / Forwarded
 GATE_TAKEOVER_RESTART=0  # 不接管 dsh-market 的重启端点
+GATE_OWNS_HOST=0         # 关掉代理侧兜底注入（静态文件补丁不受此开关影响，
+                         # 要撤补丁请用 sudo dsh-vps ownshost off）
 ```
 
 ### 架构速览
@@ -131,6 +133,7 @@ sudo dsh-vps status        # service status + health + version hints
 sudo dsh-vps restart       # restart (DSH restarts and re-exchanges its session)
 sudo dsh-vps upgrade       # upgrade DSH to the latest verified version (backup → self-check → auto rollback)
 sudo dsh-vps update-gate   # update the gateway code itself and restart (no git repo on the VPS)
+sudo dsh-vps ownshost on   # settings-page patch (lifts "settings are unavailable in this browser")
 sudo dsh-vps rollback      # switch back to the previous DSH version
 sudo dsh-vps reset-admin   # emergency reset if you lose the admin password
 sudo dsh-vps backup        # back up data (keeps the latest 3)

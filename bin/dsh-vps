@@ -77,6 +77,8 @@ cmd_update_gate() {
 	log "重启 $SERVICE ..."
 	systemctl restart "$SERVICE"
 	sleep 3
+	# 静态补丁与 gate 代码同源管理，顺手补齐（幂等）
+	ownshost_apply on >/dev/null 2>&1 || true
 	if curl -fsS --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
 		log "更新完成，gate 已就绪"
 	else
@@ -98,6 +100,7 @@ cmd_status() {
 	echo "== 配置 =="
 	[[ -f "$ROOT/state/config.json" ]] && sed 's/^/  /' "$ROOT/state/config.json" || echo "  (无 config.json)"
 	echo "  当前 DSH 版本: $(current_version)"
+	cmd_ownshost status
 	echo
 	echo "== 健康 =="
 	local health
@@ -166,6 +169,8 @@ wait_selfcheck() { # $1=重试次数
 
 switch_version() { # $1=版本目录名
 	ln -sfn "$1" "$ROOT/dsh/current"
+	# 新版本的 node_modules 是干净的，静态补丁必须重打
+	ownshost_apply on >/dev/null 2>&1 || true
 	systemctl restart "$SERVICE"
 }
 
@@ -293,6 +298,101 @@ cmd_restart() {
 
 ## endregion
 
+## region: ownshost
+
+# 公网域名下 DSH 前端按 location.hostname 判定 connection.isLoopback=false，
+# 设置镜像随即退化为 memory 持久化，设置页报"设置在此浏览器中不可用"，
+# 填 Key、改权限全部废掉。官方预留的 __DSH_TRANSPORT__.ownsHost 声明可解除
+# 该判定（dsh-client-connection: isLoopback = transport?.ownsHost === true || ...）。
+#
+# 早先走的是 gate 代理改写 HTML，已经证明太脆：压缩响应、304、超大 body
+# 任意一个条件不满足就静默失效，且外部完全看不出来。改为直接写前端静态文件：
+# dsh-host-frontend-static 对每个 index 响应都 readFile(dist/index.html)，
+# 改完即刻生效，不依赖代理、不怕缓存、不怕压缩。
+ownshost_index() { echo "$ROOT/dsh/current/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html"; }
+
+ownshost_apply() { # $1=on|off；stdout: patched / present / off
+	local mode="${1:-on}"
+	local idx
+	idx=$(ownshost_index)
+	if [[ ! -f "$idx" ]]; then
+		warn "未找到前端 index.html（$idx），跳过 ownsHost 补丁"
+		return 1
+	fi
+	local tmp rc=0
+	tmp=$(mktemp "${TMPDIR:-/tmp}/dshvps-ownshost.XXXXXX.cjs")
+	cat >"$tmp" <<'NODE'
+const fs = require("fs");
+const [file, mode] = process.argv.slice(2);
+const MARK = "dsh-vps:ownshost";
+const SNIPPET =
+	'<script data-dsh-vps="ownshost">/* ' + MARK +
+	" */window.__DSH_TRANSPORT__=Object.assign(window.__DSH_TRANSPORT__||{},{ownsHost:true});</script>";
+let s = fs.readFileSync(file, "utf8");
+const orig = file + ".orig";
+if (mode === "off") {
+	if (fs.existsSync(orig)) fs.copyFileSync(orig, file);
+	else fs.writeFileSync(file, s.split("\n").filter((l) => !l.includes(MARK)).join("\n"));
+	console.log("off");
+	process.exit(0);
+}
+if (s.includes(MARK)) {
+	console.log("present");
+	process.exit(0);
+}
+if (!fs.existsSync(orig)) fs.copyFileSync(file, orig);
+const m = s.match(/<head(?:\s[^>]*)?>/i);
+if (m === null) {
+	console.error("no <head> found in " + file);
+	process.exit(1);
+}
+const at = m.index + m[0].length;
+fs.writeFileSync(file, s.slice(0, at) + "\n    " + SNIPPET + s.slice(at));
+console.log("patched");
+NODE
+	node "$tmp" "$idx" "$mode" || rc=$?
+	rm -f "$tmp"
+	return $rc
+}
+
+cmd_ownshost() {
+	local mode="${1:-status}"
+	local idx
+	idx=$(ownshost_index)
+	case "$mode" in
+	on)
+		require_root
+		local out
+		out=$(ownshost_apply on) || { warn "ownsHost 补丁失败（见上方错误）"; return 1; }
+		if [[ "$out" == "patched" ]]; then
+			log "已写入 ownsHost 声明（原件备份为 index.html.orig）"
+			log "无需重启：DSH 每次响应都重新读取该文件。浏览器硬刷新一次即可。"
+		else
+			log "ownsHost 声明已存在，无需重复写入"
+		fi
+		;;
+	off)
+		require_root
+		ownshost_apply off >/dev/null || { warn "撤销失败"; return 1; }
+		log "已撤销 ownsHost 声明（设置页回到官方默认的不可用状态）"
+		;;
+	status)
+		if [[ ! -f "$idx" ]]; then
+			echo "  ownsHost 补丁: 未找到 $idx"
+			return 1
+		fi
+		if DSH_VPS_IDX="$idx" node -e 'process.exit(require("fs").readFileSync(process.env.DSH_VPS_IDX,"utf8").includes("dsh-vps:ownshost")?0:1)'; then
+			echo "  ownsHost 补丁: 已生效"
+		else
+			echo "  ownsHost 补丁: 未生效 → sudo dsh-vps ownshost on"
+		fi
+		;;
+	*) die "用法: dsh-vps ownshost [on|off|status]" ;;
+	esac
+}
+
+## endregion
+
 usage() {
 	cat <<'EOF'
 dsh-vps 管理命令
@@ -301,6 +401,7 @@ dsh-vps 管理命令
   restart             重启 gate（DSH 随之重启并重新兑换会话）
   upgrade [version]   升级 DSH 版本；--latest [--yes] 强上 npm 最新版
   update-gate         更新 gate 自身代码（gate/server.js）并重启
+  ownshost [on|off|status]  设置页可用性补丁（公网域名下解除"设置不可用"）
   rollback            切回上一 DSH 版本（秒级，不依赖网络）
   reset-admin [--yes] 删除管理员与向导锁，重新走初始设置
   backup              备份数据到 /opt/dsh-vps/backups/（保留 3 份）
@@ -313,6 +414,7 @@ status) cmd_status ;;
 restart) cmd_restart ;;
 upgrade) shift; cmd_upgrade "$@" ;;
 update-gate) cmd_update_gate ;;
+ownshost) shift; cmd_ownshost "$@" ;;
 rollback) cmd_rollback ;;
 reset-admin) shift; cmd_reset_admin "$@" ;;
 backup) cmd_backup ;;

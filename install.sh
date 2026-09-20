@@ -224,6 +224,9 @@ step5_gate() {
 	chmod 755 "$INSTALL_ROOT/bin/dsh-vps"
 	bash -n "$INSTALL_ROOT/bin/dsh-vps" || die "bin/dsh-vps 语法检查失败"
 	ln -sfn "$INSTALL_ROOT/bin/dsh-vps" /usr/local/bin/dsh-vps
+	# 公网域名下浏览器判定 isLoopback=false，设置页会报"设置在此浏览器中不可用"。
+	# 直接写前端静态文件解除该判定（DSH 每次响应都重读该文件，无需重启）。
+	dsh-vps ownshost on || warn "ownsHost 补丁未生效，稍后可手动运行: sudo dsh-vps ownshost on"
 }
 
 ## endregion
