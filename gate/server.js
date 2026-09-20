@@ -53,6 +53,25 @@ const PLUGIN_OPTIONS = [
 	{ id: "dsh-cost-meter", pkg: "dsh-cost-meter", name: "会话费用统计 dsh-cost-meter", desc: "本会话/当日/历史费用与额度显示" },
 	{ id: "dsh-context", pkg: "dsh-context", name: "上下文洞察 dsh-context", desc: "查看当前上下文构成与演进" },
 ];
+// 本产品仓库入口：放在 gate 自己的页面（登录 / 初始向导 / 启动等待），
+// 不碰 DSH 原生界面，DSH 升级不受影响。
+const REPO_URL = "https://github.com/AIcivilization/deepseek-harness-vps";
+const REPO_LABEL = "AIcivilization/deepseek-harness-vps";
+// 内联 GitHub 图标，不依赖外部 CDN，离线也能显示
+const REPO_ICON =
+	'<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+	'<path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>';
+const REPO_CSS =
+	".repo{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:18px;" +
+	"color:#7d8a9c;font-size:13px;text-decoration:none}" +
+	".repo:hover{color:#93c5fd}";
+function repoLink() {
+	return `<a class="repo" href="${REPO_URL}" target="_blank" rel="noreferrer">${REPO_ICON}<span>${REPO_LABEL}</span></a>`;
+}
+// 无 <style> 的页面（启动等待页）直接内联样式
+function repoLinkInline() {
+	return `<a href="${REPO_URL}" target="_blank" rel="noreferrer" style="display:inline-flex;align-items:center;gap:7px;margin-top:22px;color:#7d8a9c;font-size:13px;text-decoration:none">${REPO_ICON}<span>${REPO_LABEL}</span></a>`;
+}
 const DOMAIN_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
 const SCRYPT_KEYLEN = 64;
@@ -540,6 +559,7 @@ color:#fff;font-size:15px;cursor:pointer}
 button:hover{background:#1d4fd8}
 .err{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#2a1215;color:#f87171;font-size:13px}
 .notice{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#101c2e;color:#93c5fd;font-size:13px}
+${REPO_CSS}
 </style>
 </head>
 <body>
@@ -556,6 +576,7 @@ ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 <input id="p" name="password" type="password" autocomplete="current-password" required>
 <button type="submit">登录</button>
 </form>
+${repoLink()}
 </main>
 </body>
 </html>`;
@@ -694,6 +715,7 @@ function sendDshNotReady(res) {
 <p id="s-err" style="margin:16px 0 0;padding:10px 12px;border-radius:8px;background:#2a2112;color:#fbbf24;font-size:13px;${state.error ? "" : "display:none"}">${esc(state.error || "")}</p>
 <p id="s-wait" style="color:#7d8a9c;font-size:13px;margin:16px 0 0">已等待 <span id="s-sec">0</span> 秒… <button onclick="location.reload()" style="margin-left:8px;padding:4px 10px;border:1px solid #2a3547;border-radius:6px;background:#0d1219;color:#dbe2ea;cursor:pointer">立即刷新</button></p>
 <p style="color:#5c6b7e;font-size:12px;margin:20px 0 0">超过 2 分钟仍未就绪，多半是 3080 端口被残留进程占用或 DSH 启动失败：<code>journalctl -u dsh-gate -n 100</code>，然后 <code>systemctl restart dsh-gate</code>。</p>
+${repoLinkInline()}
 <script>
 var t0=Date.now();
 setInterval(function(){document.getElementById('s-sec').textContent=Math.round((Date.now()-t0)/1000)},1000);
@@ -1211,6 +1233,7 @@ hr{border:0;border-top:1px solid #1f2733;margin:20px 0 4px}
 .chk{display:flex;align-items:flex-start;gap:8px;margin:14px 0 2px;cursor:pointer;font-size:14px;color:#dbe2ea}
 .chk input{width:auto;margin:2px 0 0;accent-color:#2563eb}
 .chk .tip{margin:2px 0 0;font-size:12px;color:#5c6b7e}
+${REPO_CSS}
 </style>
 </head>
 <body>
@@ -1241,6 +1264,7 @@ ${PLUGIN_OPTIONS.map((o) => `
 <label class="chk"><input type="checkbox" name="plugin" value="${o.id}" checked> <span>${esc(o.name)}<br><span class="tip">${esc(o.desc)}</span></span></label>`).join("")}
 <button type="submit">完成设置</button>
 </form>
+${repoLink()}
 </main>
 </body>
 </html>`;
