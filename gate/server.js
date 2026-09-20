@@ -732,28 +732,38 @@ function sendBadGateway(res) {
  * 只有文档型 HTML 需要改写；其它响应仍是 pipe 直通，不损失流式能力。
  */
 function collectAndInject(upRes, res, status, respHeaders) {
-	const chunks = [];
+	const MAX_BYTES = 32 * 1024 * 1024;
+	let body = "";
 	let size = 0;
 	let overflow = false;
+	upRes.setEncoding("utf8"); // 按字符边界收，避免多字节字符被 chunk 切断
 	upRes.on("data", (chunk) => {
-		if (overflow) return;
-		size += chunk.byteLength;
-		if (size > 8 * 1024 * 1024) {
-			overflow = true;
+		if (overflow) {
+			res.write(chunk); // 已进入直通：剩余部分原样流式回传
 			return;
 		}
-		chunks.push(chunk);
+		size += Buffer.byteLength(chunk, "utf8");
+		if (size > MAX_BYTES) {
+			// 超限：放弃改写，已收集部分 + 后续全部原样转发（不截断）
+			overflow = true;
+			res.writeHead(status, respHeaders); // 无 content-length → 走 chunked
+			res.write(body);
+			res.write(chunk);
+			body = "";
+			return;
+		}
+		body += chunk;
 	});
 	upRes.on("end", () => {
-		let body = Buffer.concat(chunks).toString("utf8");
-		if (!overflow) {
-			const at = body.search(/<head\b[^>]*>/i);
-			if (at !== -1) {
-				const end = body.indexOf(">", at) + 1;
-				body = body.slice(0, end) + OWNS_HOST_SNIPPET + body.slice(end);
-			} else {
-				body = OWNS_HOST_SNIPPET + body;
-			}
+		if (overflow) {
+			res.end();
+			return;
+		}
+		// 只有完整的 HTML 文档才改写；找不到 <head> 说明不是文档（片段/JSON 误标），原样转发
+		const at = body.search(/<head\b[^>]*>/i);
+		if (at !== -1) {
+			const end = body.indexOf(">", at) + 1;
+			body = body.slice(0, end) + OWNS_HOST_SNIPPET + body.slice(end);
 		}
 		const payload = Buffer.from(body, "utf8");
 		res.writeHead(status, { ...respHeaders, "content-length": payload.byteLength });
@@ -793,12 +803,14 @@ function proxyHttp(req, res) {
 			responded = true;
 			const respHeaders = {};
 			let isHtml = false;
+			let encoded = false; // 上游已压缩：无法改写，原样直通
 			for (const [key, value] of Object.entries(upRes.headers)) {
 				if (HOP_HEADERS.has(key)) continue;
 				if (key === "content-length") continue; // 长度按最终响应体重算
 				if (key === "content-type") {
 					isHtml = String(value).includes("text/html");
 				}
+				if (key === "content-encoding") encoded = true;
 				if (key === "set-cookie") {
 					// DSH Cookie 绝不下发到用户浏览器
 					const filtered = value.filter((c) => !c.startsWith(DSH_COOKIE_PREFIX));
@@ -810,7 +822,7 @@ function proxyHttp(req, res) {
 			// HTML 文档：注入 ownsHost 声明，让设置页在公网域名下同样可用（见文件头说明）。
 			// 只对导航型 GET/HEAD 的 200 响应改写；其余（含任何流式响应）一律 pipe 直通。
 			const navigational = req.method === "GET" || req.method === "HEAD";
-			if (OWNS_HOST_INJECT && isHtml && navigational && upRes.statusCode === 200) {
+			if (OWNS_HOST_INJECT && isHtml && navigational && !encoded && upRes.statusCode === 200) {
 				collectAndInject(upRes, res, upRes.statusCode, respHeaders);
 				return;
 			}
