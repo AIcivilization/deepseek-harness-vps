@@ -54,6 +54,29 @@ const DOMAIN_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
 const SCRYPT_KEYLEN = 64;
 
+// 公网访问时页面 hostname 不是回环，DSH 前端会据此判定"这不是操作者自己的浏览器"，
+// 进而把设置页降级为不可用：dsh-client-ui-settings 里
+//   persistence = ctx.remote.$host.isLoopback ? 'host' : 'memory'
+// 而 isLoopback 由浏览器端的 isLoopbackHostname(location.hostname) 决定（
+// dsh-client-connection），--trusted-host 只打开了网络围栏，不改变这个判定。
+// DSH 官方为"页面自己拥有 Host"的场景留了 __DSH_TRANSPORT__.ownsHost 声明，
+// gate 作为已认证的本地代理注入该声明，即可让设置页/填 Key/权限策略全部恢复。
+// 设 GATE_OWNS_HOST=0 可关闭注入（退回"设置页不可用"的官方默认行为）。
+const OWNS_HOST_INJECT = process.env.GATE_OWNS_HOST !== "0";
+const OWNS_HOST_SNIPPET = '<script>window.__DSH_TRANSPORT__={ownsHost:true}</script>';
+
+// DSH 的若干特权端点（dsh-market 的 restart / backup 导出 / self-uninstall）要求
+// "直连回环"：只要出现 x-forwarded-for / x-real-ip / forwarded 任一头，
+// 就认定回环对端是代理而非用户本人并 403。gate 是本机可信代理，转发前剥掉这些头。
+// 设 GATE_STRIP_FORWARDING=0 可关闭剥离。
+const STRIP_FORWARDING = process.env.GATE_STRIP_FORWARDING !== "0";
+const FORWARDING_HEADERS = new Set(["forwarded", "x-forwarded-for", "x-real-ip"]);
+
+// dsh-market 的"立即重启"端点。gate 必须接管它：让 dsh-market 自己重启会
+// 在 gate 之外拉起一个新的 DSH 进程，抢占 3080 端口，gate 的子进程随后
+// EADDRINUSE 且再也抓不到 launchToken → 永久"会话尚未就绪"。
+const MARKET_RESTART_PATHS = new Set(["/dsh-market/restart", "/dsh-market/restart/"]);
+
 // 逐跳头：代理时重建，不透传（请求侧 transfer-encoding 由 node 自动处理）
 const HOP_HEADERS = new Set([
 	"connection",
@@ -277,8 +300,46 @@ const dsh = {
 	restarts: 0,
 	startedAt: 0,
 	shuttingDown: false,
+	lastError: null, // 最近一次阻塞性故障（人类可读，供 /gate/health 与等待页展示）
+	lastExchangeError: null, // 最近一次 token 兑换失败原因
+	lastExit: null, // { code, signal, at, uptimeMs }
+	crashStreak: 0, // 连续快速退出次数（用于退避）
+	outputTail: "", // DSH 输出尾部（排障用）
 };
 let exchangeTimer = null;
+
+/** DSH 输出是否显示端口被占用（常见于上一轮 DSH 残留进程 / 被外部拉起的 DSH）。 */
+function looksLikePortConflict(text) {
+	return /EADDRINUSE|address already in use|端口已被占用/i.test(text);
+}
+
+/** 启动前探一下 3080：已被占用说明有残留/外部 DSH，我们的子进程会拿不到端口。 */
+function probePortBusy() {
+	return new Promise((resolve) => {
+		const socket = net.connect(DSH_PORT, DSH_HOST);
+		const done = (busy) => {
+			socket.destroy();
+			resolve(busy);
+		};
+		socket.setTimeout(1500);
+		socket.on("connect", () => done(true));
+		socket.on("timeout", () => done(false));
+		socket.on("error", () => done(false));
+	});
+}
+
+/** 统一入口：重启 DSH 子进程（token/cookie 作废 → 自动重新捕获与兑换）。 */
+function restartDsh(reason) {
+	if (dsh.shuttingDown) return;
+	log(`restarting dsh${reason ? ` (${reason})` : ""}`);
+	dsh.token = null;
+	dsh.cookie = null;
+	dsh.lastError = null;
+	dsh.lastExchangeError = null;
+	clearTimeout(exchangeTimer);
+	if (dsh.child) dsh.child.kill("SIGTERM"); // exit 处理器负责重新 spawn
+	else spawnDsh();
+}
 
 function spawnDsh() {
 	if (dsh.shuttingDown) return;
@@ -297,7 +358,13 @@ function spawnDsh() {
 	let scanBuf = "";
 	const scan = (chunk) => {
 		process.stdout.write(chunk); // DSH 输出原样转发到 journal
-		scanBuf = scanForToken(scanBuf + chunk.toString());
+		const text = chunk.toString();
+		dsh.outputTail = (dsh.outputTail + text).slice(-2048);
+		if (looksLikePortConflict(text)) {
+			dsh.lastError = `${DSH_PORT} 端口被占用（残留或其他 DSH 进程），本进程无法监听：journal 见 EADDRINUSE。处理：sudo ss -ltnp | grep ${DSH_PORT} 查到 PID 后 kill，或 systemctl restart dsh-gate`;
+			log(`dsh startup looks blocked: ${dsh.lastError}`);
+		}
+		scanBuf = scanForToken(scanBuf + text);
 	};
 	child.stdout.on("data", scan);
 	child.stderr.on("data", scan);
@@ -313,11 +380,29 @@ function spawnDsh() {
 			dsh.cookie = null;
 			clearTimeout(exchangeTimer);
 			if (!dsh.shuttingDown) {
+				const uptimeMs = Date.now() - dsh.startedAt;
+				dsh.lastExit = { code, signal, at: Date.now(), uptimeMs };
 				dsh.restarts += 1;
-				setTimeout(spawnDsh, 2000);
+				// 快速退出（<5s）多半是端口/配置类硬故障：退避重启，避免空转打满 journal
+				dsh.crashStreak = uptimeMs < 5000 ? dsh.crashStreak + 1 : 0;
+				const delay = dsh.crashStreak > 1 ? Math.min(2000 * 2 ** (dsh.crashStreak - 1), 30_000) : 2000;
+				if (dsh.crashStreak >= 3) {
+					dsh.lastError = dsh.lastError || `DSH 连续 ${dsh.crashStreak} 次快速退出（最近一次 code=${code} signal=${signal}，存活 ${uptimeMs}ms）。常见原因：3080 端口被占用、DSH_BIN 路径失效、DSH_HOME 权限问题。详见 journalctl -u dsh-gate -n 100`;
+				}
+				setTimeout(spawnDsh, delay);
 			}
 		}
 	});
+}
+
+/** 首次启动前先探端口，命中则把结论直接写进 lastError，等待页与 health 都能看到。 */
+async function spawnDshWithPreflight() {
+	const busy = await probePortBusy();
+	if (busy) {
+		dsh.lastError = `${DSH_HOST}:${DSH_PORT} 启动前已被占用：可能有残留的 DSH 进程（或 dsh-market 自行拉起的实例）。gate 只能从自己的子进程 stdout 捕获 launchToken，端口被别人占着就永远兑换不到会话。处理：sudo ss -ltnp | grep ${DSH_PORT} → kill 对应 PID，再 systemctl restart dsh-gate`;
+		log(dsh.lastError);
+	}
+	spawnDsh();
 }
 
 /** 在 DSH 输出中捕获 `?token=<launchToken>`；命中即触发兑换。 */
@@ -369,6 +454,7 @@ function exchangeToken(attempt) {
 }
 
 function retryExchange(attempt, why) {
+	dsh.lastExchangeError = why;
 	if (!dsh.token || !dsh.child || dsh.shuttingDown) return;
 	const delay = Math.min(1000 * 2 ** attempt, 15_000);
 	log(`token exchange failed (${why}); retry in ${delay}ms`);
@@ -396,6 +482,9 @@ function applyDshCookie(setCookieLine) {
 		}
 	}
 	dsh.cookie = { name, value, expiresAt, authority: authorityOf(dshTrustedHost) };
+	dsh.lastExchangeError = null;
+	dsh.lastError = null;
+	dsh.crashStreak = 0;
 	log(`dsh session cookie acquired (authority=${dsh.cookie.authority}, expires=${new Date(expiresAt).toISOString()})`);
 }
 
@@ -563,20 +652,122 @@ function handleHealth(req, res) {
 			dshCookie: cookie
 				? { authority: cookie.authority, expiresAt: cookie.expiresAt, expiresInHours: Math.round((cookie.expiresAt - Date.now()) / 3_600_000) }
 				: null,
+			lastError: dsh.lastError,
+			lastExchangeError: dsh.lastExchangeError,
+			lastExit: dsh.lastExit,
+			crashStreak: dsh.crashStreak,
 		}),
 	);
 }
 
+/**
+ * gate 侧兜底：直接写 DeepSeek API Key（credentials/set），不依赖原生设置页。
+ * 用途：设置页因任何原因不可用时，仍有一条不受浏览器信任判定影响的通道。
+ */
+async function handleGateKey(req, res) {
+	const page = (message, kind) => `<!doctype html><meta charset="utf-8"><title>dsh-vps · API Key</title>
+<meta name="robots" content="noindex">
+<body style="background:#0b0e14;color:#dbe2ea;font:15px/1.7 system-ui,-apple-system,'Segoe UI',sans-serif;padding:40px;max-width:520px">
+<h2 style="margin:0 0 16px">写入 DeepSeek API Key</h2>
+${message ? `<p style="padding:10px 12px;border-radius:8px;background:${kind === "err" ? "#2a1215;color:#f87171" : "#101c2e;color:#93c5fd"};font-size:13px">${esc(message)}</p>` : ""}
+<form method="post" action="/gate/key">
+<label style="display:block;margin:12px 0 4px;font-size:13px;color:#9aa7b8" for="k">API Key（sk-...）</label>
+<input id="k" name="apiKey" type="password" autocomplete="off" placeholder="sk-..." style="width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid #2a3547;border-radius:8px;background:#0d1219;color:#e6edf5;font-size:15px">
+<button type="submit" style="margin-top:18px;padding:9px 16px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:15px;cursor:pointer">写入</button>
+</form>
+<p style="color:#5c6b7e;font-size:12px;margin:18px 0 0">写入走服务端特权通道（credentials/set），明文不落 gate 任何文件。留空提交可查看当前是否已配置。</p>
+<p style="margin:10px 0 0"><a href="/" style="color:#60a5fa;font-size:13px">返回 DeepSeek Harness</a></p></body>`;
+
+	if (req.method === "GET" || req.method === "HEAD") {
+		sendHtml(res, 200, page(""));
+		return;
+	}
+	if (req.method !== "POST") {
+		sendText(res, 405, "method not allowed");
+		return;
+	}
+	let form;
+	try {
+		form = new URLSearchParams(await readBody(req, 64 * 1024));
+	} catch {
+		sendText(res, 400, "bad request");
+		return;
+	}
+	const apiKey = String(form.get("apiKey") || "").trim();
+	try {
+		await waitForDshCookie(30_000);
+	} catch (err) {
+		sendHtml(res, 503, page(`DSH 会话尚未就绪：${err.message}`, "err"));
+		return;
+	}
+	try {
+		if (!apiKey) {
+			const info = await dshRpc("credentials/describe", { refs: [DEEPSEEK_KEY_REF] });
+			const list = Array.isArray(info) ? info : [];
+			const found = list.find((c) => c && c.ref === DEEPSEEK_KEY_REF);
+			sendHtml(res, 200, page(found && found.present ? "当前已配置 API Key（未改动）。" : "当前未配置 API Key。"));
+			return;
+		}
+		await dshRpc("credentials/set", { ref: DEEPSEEK_KEY_REF, value: apiKey });
+		log("api key written via /gate/key");
+		sendHtml(res, 200, page("已写入 DeepSeek API Key。"));
+	} catch (err) {
+		log(`/gate/key failed: ${err.message}`);
+		sendHtml(res, 502, page(`写入失败：${err.message}`, "err"));
+	}
+}
+
+/**
+ * DSH 会话尚未就绪（DSH 还在启动，或 token 兑换/端口出了问题）。
+ * 页面自己轮询 /gate/health，一旦会话就绪立即刷新；同时把阻塞原因直接摆在页面上，
+ * 免得用户只能去翻 journalctl。
+ */
 function sendDshNotReady(res) {
+	const state = notReadyState();
 	sendHtml(
 		res,
 		503,
-		`<!doctype html><meta charset="utf-8"><title>503</title>
-<body style="background:#0b0e14;color:#dbe2ea;font:15px system-ui;padding:40px">
-<h2>DeepSeek Harness 会话尚未就绪</h2>
-<p>gate 正在等待 DSH 启动并完成会话兑换，请稍候刷新页面。</p>
-<p style="color:#7d8a9c">排障：journalctl -u dsh-gate -n 50</p></body>`,
+		`<!doctype html><meta charset="utf-8"><title>503 DeepSeek Harness 启动中</title>
+<meta name="robots" content="noindex">
+<body style="background:#0b0e14;color:#dbe2ea;font:15px/1.7 system-ui,-apple-system,'Segoe UI',sans-serif;padding:40px;max-width:760px">
+<h2 style="margin:0 0 4px">DeepSeek Harness 正在启动</h2>
+<p style="color:#7d8a9c;margin:0 0 20px">gate 还没拿到 DSH 会话；本页每 3 秒自动检查一次，就绪后会自动刷新。</p>
+<table style="border-collapse:collapse;font-size:14px">
+<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">DSH 子进程</td><td id="s-alive">${state.childAlive ? "运行中" : "未运行"}</td></tr>
+<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">launchToken</td><td id="s-token">${state.tokenCaptured ? "已捕获" : "未捕获"}</td></tr>
+<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">会话 Cookie</td><td id="s-cookie">${state.cookieReady ? "已就绪" : "等待兑换"}</td></tr>
+</table>
+<p id="s-err" style="margin:16px 0 0;padding:10px 12px;border-radius:8px;background:#2a2112;color:#fbbf24;font-size:13px;${state.error ? "" : "display:none"}">${esc(state.error || "")}</p>
+<p id="s-wait" style="color:#7d8a9c;font-size:13px;margin:16px 0 0">已等待 <span id="s-sec">0</span> 秒… <button onclick="location.reload()" style="margin-left:8px;padding:4px 10px;border:1px solid #2a3547;border-radius:6px;background:#0d1219;color:#dbe2ea;cursor:pointer">立即刷新</button></p>
+<p style="color:#5c6b7e;font-size:12px;margin:20px 0 0">超过 2 分钟仍未就绪，多半是 3080 端口被残留进程占用或 DSH 启动失败：<code>journalctl -u dsh-gate -n 100</code>，然后 <code>systemctl restart dsh-gate</code>。</p>
+<script>
+var t0=Date.now();
+setInterval(function(){document.getElementById('s-sec').textContent=Math.round((Date.now()-t0)/1000)},1000);
+setInterval(function(){
+  fetch('/gate/health',{cache:'no-store'}).then(function(r){return r.json()}).then(function(h){
+    var alive=h.dsh&&h.dsh.alive, tok=h.launchTokenCaptured, ck=!!h.dshCookie;
+    document.getElementById('s-alive').textContent=alive?'运行中':'未运行';
+    document.getElementById('s-token').textContent=tok?'已捕获':'未捕获';
+    document.getElementById('s-cookie').textContent=ck?'已就绪':'等待兑换';
+    var err=(h.dsh&&h.dsh.lastError)||h.lastExchangeError||'';
+    var box=document.getElementById('s-err');
+    if(err){box.style.display='';box.textContent=err}else{box.style.display='none'}
+    if(ck) location.reload();
+  }).catch(function(){});
+},3000);
+</script></body>`,
+		{ "retry-after": "3" },
 	);
+}
+
+function notReadyState() {
+	const error = dsh.lastError || dsh.lastExchangeError || (dsh.lastExit ? `DSH 已退出 (code=${dsh.lastExit.code} signal=${dsh.lastExit.signal})，即将自动重启` : null);
+	return {
+		childAlive: dsh.child !== null,
+		tokenCaptured: dsh.token !== null,
+		cookieReady: dsh.cookie !== null,
+		error,
+	};
 }
 
 function sendBadGateway(res) {
@@ -591,6 +782,41 @@ function sendBadGateway(res) {
 	);
 }
 
+/**
+ * 收下上游 HTML（限 8MiB），在 <head> 之后插入 ownsHost 声明后整体下发。
+ * 只有文档型 HTML 需要改写；其它响应仍是 pipe 直通，不损失流式能力。
+ */
+function collectAndInject(upRes, res, status, respHeaders) {
+	const chunks = [];
+	let size = 0;
+	let overflow = false;
+	upRes.on("data", (chunk) => {
+		if (overflow) return;
+		size += chunk.byteLength;
+		if (size > 8 * 1024 * 1024) {
+			overflow = true;
+			return;
+		}
+		chunks.push(chunk);
+	});
+	upRes.on("end", () => {
+		let body = Buffer.concat(chunks).toString("utf8");
+		if (!overflow) {
+			const at = body.search(/<head\b[^>]*>/i);
+			if (at !== -1) {
+				const end = body.indexOf(">", at) + 1;
+				body = body.slice(0, end) + OWNS_HOST_SNIPPET + body.slice(end);
+			} else {
+				body = OWNS_HOST_SNIPPET + body;
+			}
+		}
+		const payload = Buffer.from(body, "utf8");
+		res.writeHead(status, { ...respHeaders, "content-length": payload.byteLength });
+		res.end(payload);
+	});
+	upRes.on("error", () => res.end());
+}
+
 /** 透明代理：Host 原样透传，重建 Cookie（剥离 dsh-auth-* → 注入服务端 DSH Cookie），剥掉 /?token=。 */
 function proxyHttp(req, res) {
 	if (!dsh.cookie) {
@@ -601,6 +827,8 @@ function proxyHttp(req, res) {
 	const headers = {};
 	for (const [key, value] of Object.entries(req.headers)) {
 		if (HOP_HEADERS.has(key) || key === "cookie") continue;
+		// 转发头会让 DSH 判定"回环对端是代理"而拒绝特权端点（如 dsh-market 重启）
+		if (STRIP_FORWARDING && FORWARDING_HEADERS.has(key)) continue;
 		headers[key] = value;
 	}
 	const cookie = upstreamCookieHeader(req.headers.cookie, authority);
@@ -619,8 +847,13 @@ function proxyHttp(req, res) {
 		(upRes) => {
 			responded = true;
 			const respHeaders = {};
+			let isHtml = false;
 			for (const [key, value] of Object.entries(upRes.headers)) {
 				if (HOP_HEADERS.has(key)) continue;
+				if (key === "content-length") continue; // 长度按最终响应体重算
+				if (key === "content-type") {
+					isHtml = String(value).includes("text/html");
+				}
 				if (key === "set-cookie") {
 					// DSH Cookie 绝不下发到用户浏览器
 					const filtered = value.filter((c) => !c.startsWith(DSH_COOKIE_PREFIX));
@@ -628,6 +861,11 @@ function proxyHttp(req, res) {
 					continue;
 				}
 				respHeaders[key] = value;
+			}
+			// HTML 文档：注入 ownsHost 声明，让设置页在公网域名下同样可用（见文件头说明）
+			if (isHtml && OWNS_HOST_INJECT) {
+				collectAndInject(upRes, res, upRes.statusCode || 502, respHeaders);
+				return;
 			}
 			res.writeHead(upRes.statusCode || 502, respHeaders);
 			upRes.pipe(res);
@@ -654,6 +892,26 @@ function denyUnauthenticated(req, res, pathname) {
 	res.end();
 }
 
+/**
+ * 接管 dsh-market 的"立即重启"：官方实现会自行拉起一个新的 dsh 进程，
+ * 在 systemd 下会脱离 gate 的父子关系——新进程抢走 3080，gate 的子进程随后
+ * EADDRINUSE，且 gate 永远读不到新进程的 launchToken（页面卡在"会话尚未就绪"）。
+ * 这里按官方客户端的协议回 202 + ok，然后由 gate 自己重启 DSH 子进程：
+ * 子进程是全新的，/dsh-market/status 的 boot id 随之变化，前端会自动 reload。
+ */
+function handleMarketRestart(req, res) {
+	if (req.method !== "POST") {
+		res.writeHead(405, { allow: "POST", "content-length": "0" });
+		res.end();
+		return;
+	}
+	log("market restart requested; gate takes over");
+	res.writeHead(202, { "content-type": "application/json", "cache-control": "no-store" });
+	res.end(JSON.stringify({ ok: true, managedBy: "dsh-gate", note: "由 gate 重启 DSH 子进程" }));
+	// 让 202 先落地，再动手（客户端随后轮询 /dsh-market/status 等 boot id 变化）
+	setTimeout(() => restartDsh("market restart"), 300);
+}
+
 //#endregion
 
 //#region WebSocket upgrade 透传
@@ -676,6 +934,7 @@ function handleUpgrade(req, socket, head) {
 		const lines = [`${req.method} ${sanitizedPath(req.url || "/")} HTTP/1.1`];
 		for (const [key, value] of Object.entries(req.headers)) {
 			if (key === "cookie") continue;
+			if (STRIP_FORWARDING && FORWARDING_HEADERS.has(key)) continue;
 			if (Array.isArray(value)) for (const v of value) lines.push(`${key}: ${v}`);
 			else lines.push(`${key}: ${value}`);
 		}
@@ -707,6 +966,25 @@ function setupOpen() {
 
 /** 服务端身份调用 DSH 特权 RPC（走已注入的会话 Cookie，等价于"登录态探测"）。 */
 function dshRpc(method, args) {
+	const dotted = method.replace(/\//g, ".");
+	const candidates = [
+		{ path: `/api/${method}`, method },
+		// 上游若改为 "命名空间 + 点号方法名" 的路由形状，退回到 /api/<ns>
+		{ path: `/api/${dotted.split(".")[0]}`, method: dotted },
+	];
+	return rpcAttempt(candidates, 0, args);
+}
+
+function rpcAttempt(candidates, index, args) {
+	if (index >= candidates.length) return Promise.reject(new Error(`rpc ${candidates[0].method} failed (all endpoint shapes)`));
+	const { path, method } = candidates[index];
+	return rpcOnce(path, method, args).catch((err) => {
+		if (/rpc http 404|rpc http 400|not found/i.test(String(err && err.message))) return rpcAttempt(candidates, index + 1, args);
+		throw err;
+	});
+}
+
+function rpcOnce(path, method, args) {
 	return new Promise((resolve, reject) => {
 		if (!dsh.cookie) {
 			reject(new Error("dsh session not ready"));
@@ -719,7 +997,7 @@ function dshRpc(method, args) {
 				host: DSH_HOST,
 				port: DSH_PORT,
 				method: "POST",
-				path: `/api/${method}`,
+				path,
 				headers: {
 					host: dshTrustedHost,
 					"content-type": "application/json",
@@ -844,8 +1122,7 @@ async function applyDomainChange(domain) {
 	}
 	dshTrustedHost = domain;
 	persistTrustedHost(domain);
-	if (dsh.child) dsh.child.kill("SIGTERM"); // 触发自动重启 → 新 --trusted-host → 重新兑换
-	log(`trusted host changed to ${domain}; dsh restarting`);
+	restartDsh(`trusted host changed to ${domain}`);
 }
 
 function writeAdminRecord(username, password) {
@@ -907,11 +1184,7 @@ async function installPlugins(packages) {
 			}
 		}
 	}
-	if (installed > 0 && dsh.child) {
-		log("restarting dsh to load newly installed plugins");
-		dsh.token = null; // 强制网关在重启后重新捕获 token + 兑换
-		dsh.child.kill("SIGTERM");
-	}
+	if (installed > 0) restartDsh("plugins installed");
 }
 
 // 向导限流（内存）：同 IP 10 次 / 10 分钟
@@ -1211,6 +1484,8 @@ function main() {
 					denyUnauthenticated(req, res, pathname);
 					return;
 				}
+				if (pathname === "/gate/key") return handleGateKey(req, res);
+				if (MARKET_RESTART_PATHS.has(pathname)) return handleMarketRestart(req, res);
 				proxyHttp(req, res);
 			})
 			.catch((err) => {
@@ -1224,7 +1499,7 @@ function main() {
 		log(`listening on http://${GATE_HOST}:${GATE_PORT} (trusted host: ${dshTrustedHost})`);
 	});
 
-	spawnDsh();
+	spawnDshWithPreflight();
 
 	// DSH Cookie 续期：剩余有效期 < 24h 时用同一 launchToken 重新兑换
 	setInterval(() => {
