@@ -779,11 +779,16 @@ function proxyHttp(req, res) {
 		return;
 	}
 	const authority = requestAuthority(req.headers);
+	// 导航请求（浏览器要 HTML）：必须拿到完整 200 才能改写，否则浏览器会用本地
+	// 缓存的那份没有 ownsHost 的旧 HTML，设置页就会一直报"在此浏览器中不可用"。
+	const wantsHtml = OWNS_HOST_INJECT && String(req.headers.accept || "").includes("text/html");
 	const headers = {};
 	for (const [key, value] of Object.entries(req.headers)) {
 		if (HOP_HEADERS.has(key) || key === "cookie") continue;
 		// 转发头会让 DSH 判定"回环对端是代理"而拒绝特权端点（如 dsh-market 重启）
 		if (STRIP_FORWARDING && FORWARDING_HEADERS.has(key)) continue;
+		// 条件请求会让上游回 304（无 body 可改写），导航请求一律取全量
+		if (wantsHtml && (key === "if-none-match" || key === "if-modified-since")) continue;
 		headers[key] = value;
 	}
 	const cookie = upstreamCookieHeader(req.headers.cookie, authority);
@@ -823,7 +828,11 @@ function proxyHttp(req, res) {
 			// 只对导航型 GET/HEAD 的 200 响应改写；其余（含任何流式响应）一律 pipe 直通。
 			const navigational = req.method === "GET" || req.method === "HEAD";
 			if (OWNS_HOST_INJECT && isHtml && navigational && !encoded && upRes.statusCode === 200) {
-				collectAndInject(upRes, res, upRes.statusCode, respHeaders);
+				// 改写过的 HTML 不能再被缓存复用，也不该再带校验器（否则下次又走 304）
+				const injected = { ...respHeaders, "cache-control": "no-store" };
+				delete injected.etag;
+				delete injected["last-modified"];
+				collectAndInject(upRes, res, upRes.statusCode, injected);
 				return;
 			}
 			res.writeHead(upRes.statusCode || 502, respHeaders);
