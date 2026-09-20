@@ -10,7 +10,7 @@
 # 目标 OS：Ubuntu 22.04+ / Debian 12+（裸机，无 Docker）
 # 设计依据：dsh-vps-architecture-design.md §4.1 / §4.3 / §4.4 / §5 / §10
 #
-# 说明：仓库未发布时 curl 管道模式无法拉取 gate 代码，请在克隆目录内直接运行。
+# 说明：仓库已公开，curl 管道模式可直接拉取 gate 代码；若在克隆目录内运行则优先用本地文件。
 
 set -euo pipefail
 

@@ -35,7 +35,20 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
   | sudo bash -s -- --domain dsh.example.com
 ```
 
-国内网络可加 `--mirror cn`（npm 走 npmmirror）。不传 `--domain` 则先以 IP 起服务，域名稍后在浏览器向导里填。
+> 国内网络建议加 `--mirror cn`（npm 走 npmmirror）：`sudo bash -s -- --domain dsh.example.com --mirror cn`
+
+### 卸载（重装前先跑这条）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh \
+  | sudo bash -s -- --yes
+```
+
+删服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份到 `/root/dsh-vps-uninstall-<时间戳>.tar.gz`。`--keep-data` 保留 DSH 数据，`--purge-caddy` 连 Caddy 一起移除。
+
+卸载完再跑上面的安装命令，即为全新环境。
+
+### 管理命令
 
 安装完成后浏览器打开输出的地址，自动进入初始设置向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与常用插件 → 登录即用。API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
