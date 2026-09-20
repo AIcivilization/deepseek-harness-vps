@@ -58,7 +58,9 @@ cmd_backup() {
 cmd_update_gate() {
 	require_root
 	[[ -f "$ROOT/gate/server.js" ]] || die "未找到 $ROOT/gate/server.js（不是 dsh-vps 安装目录？）"
-	local tmp="$ROOT/gate/server.js.new"
+	# node --check 走 ESM loader，只认 .js/.cjs/.mjs 等已知后缀；用 .cjs 同时
+	# 锁定 CommonJS 解析，不受将来可能出现的 package.json {"type":"module"} 影响。
+	local tmp="$ROOT/gate/server.update.cjs"
 	log "拉取最新 gate/server.js ($RAW_BASE/gate/server.js)"
 	curl -fsSL --max-time 30 "$RAW_BASE/gate/server.js" -o "$tmp" \
 		|| { rm -f "$tmp"; die "拉取失败（离线？或 DSHVPS_RAW_BASE 指向有误）"; }
