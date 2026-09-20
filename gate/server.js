@@ -50,6 +50,24 @@ const PLUGIN_OPTIONS = [
 	{ id: "dsh-cost-meter", pkg: "dsh-cost-meter", name: "会话费用统计 dsh-cost-meter", desc: "本会话/当日/历史费用与额度显示" },
 	{ id: "dsh-context", pkg: "dsh-context", name: "上下文洞察 dsh-context", desc: "查看当前上下文构成与演进" },
 ];
+// 初始设置时随安装自带、不可取消的两个插件：dsh-vps 的核心场景就是把订阅额度
+// 与任务调度开箱带到公网页面上，因此不做成可选项。用法见 README。
+const BUNDLED_PLUGINS = [
+	{
+		pkg: "@goodandready/dsh-subscriptions",
+		name: "订阅接入 dsh-subscriptions",
+		desc: "把 ChatGPT / Claude / Grok / Kimi / GLM 等 16 家订阅经 OAuth 桥接为 LLM 提供方，多账户池轮换",
+		url: "https://github.com/GooDAnDReaDY/dsh-subscriptions",
+		after: "设置 → 插件 → Subscriptions 中绑定账户",
+	},
+	{
+		pkg: "@linxin666/dsh-client-ui-task-board",
+		name: "任务看板 dsh-task-board",
+		desc: "Web 端任务看板，可真实执行会话、按 Host cron 定时调度",
+		url: "https://github.com/zhu1090093659/dsh-web/tree/main/packages/dsh-task-board",
+		after: "左侧栏 Task Board 入口直接使用",
+	},
+];
 const DOMAIN_PATTERN = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
 const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
 const SCRYPT_KEYLEN = 64;
@@ -1205,7 +1223,10 @@ button:hover{background:#1d4fd8}
 hr{border:0;border-top:1px solid #1f2733;margin:20px 0 4px}
 .chk{display:flex;align-items:flex-start;gap:8px;margin:14px 0 2px;cursor:pointer;font-size:14px;color:#dbe2ea}
 .chk input{width:auto;margin:2px 0 0;accent-color:#2563eb}
-.chk .tip{margin:2px 0 0;font-size:12px;color:#5c6b7e}
+.tip{margin:2px 0 0;font-size:12px;color:#5c6b7e}
+.bundle{margin:12px 0 0;font-size:14px;color:#dbe2ea}
+.bundle a{color:#60a5fa;text-decoration:none}
+.bundle a:hover{text-decoration:underline}
 </style>
 </head>
 <body>
@@ -1230,6 +1251,10 @@ ${(warnings || []).map((w) => `<p class="warn">${esc(w)}</p>`).join("")}
 <label for="k">DeepSeek API Key（可选）</label>
 <input id="k" name="apiKey" type="password" autocomplete="off" placeholder="sk-...">
 <p class="hint">现在填写最省事；跳过也可稍后在登录后的「添加 API Key」引导，或设置 → 模型 → DeepSeek 中填写。</p>
+<hr>
+<p class="hint" style="margin:2px 0 0">已捆绑，随初始设置一并安装（无需选择）</p>
+${BUNDLED_PLUGINS.map((o) => `
+<div class="bundle"><a href="${esc(o.url)}" target="_blank" rel="noreferrer">${esc(o.name)}</a><br><span class="tip">${esc(o.desc)}</span><br><span class="tip">装好后：${esc(o.after)}</span></div>`).join("")}
 <hr>
 <p class="hint" style="margin:2px 0 0">常用插件（可选，安装后自动重启 DSH 生效）</p>
 ${PLUGIN_OPTIONS.map((o, i) => `
@@ -1271,10 +1296,14 @@ async function handleSetup(req, res) {
 	const password2 = String(form.get("password2") || "");
 	const domain = String(form.get("domain") || "").trim().toLowerCase();
 	const apiKey = String(form.get("apiKey") || "").trim();
-	const plugins = (form.getAll("plugin") || [])
-		.map((v) => PLUGIN_OPTIONS.find((o) => o.id === v || o.pkg === v))
-		.filter(Boolean)
-		.map((o) => o.pkg);
+	// 捆绑插件恒装在前，可选项随后；同一 pkg 只装一次
+	const plugins = [
+		...BUNDLED_PLUGINS.map((o) => o.pkg),
+		...(form.getAll("plugin") || [])
+			.map((v) => PLUGIN_OPTIONS.find((o) => o.id === v || o.pkg === v))
+			.filter(Boolean)
+			.map((o) => o.pkg),
+	].filter((pkg, i, arr) => arr.indexOf(pkg) === i);
 
 	const redisplay = (error) => {
 		recordSetupFailure(ip);
