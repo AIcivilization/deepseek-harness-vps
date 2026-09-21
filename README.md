@@ -113,11 +113,9 @@ sudo dsh-vps backup        # 备份数据（保留最近 3 份）
 
 ## 运行机制
 
-```
-浏览器 ──HTTPS──▶ Caddy ──▶ dsh-gate(:3100, 仅回环) ──▶ dsh web(:3080, 仅回环)
-                              登录门 + 透明代理              官方原版 DSH
-                              + 服务端 DSH 会话 Cookie 注入
-```
+<p align="center">
+  <img src="assets/architecture.svg" alt="请求链路：浏览器 → Caddy → dsh-gate → dsh web" width="680">
+</p>
 
 DSH 与网关均只绑 127.0.0.1，用户浏览器接触不到 DSH 的会话 Cookie，所有请求经网关认证后透传。
 

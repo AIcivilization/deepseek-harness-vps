@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 258" width="680" height="258" role="img" aria-label="dsh-vps 请求链路：浏览器经 HTTPS 到 Caddy，再到登录网关 dsh-gate，最后到官方原版 DSH">
+  <title>dsh-vps 请求链路</title>
+  <desc>浏览器通过 HTTPS 访问 Caddy，Caddy 反向代理到仅监听回环的登录网关 dsh-gate，网关认证后透传给同样只监听回环的官方原版 DSH。</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">
+
+    <rect x="40" y="46" width="130" height="56" rx="8" fill="#F1EFE8" stroke="#5F5E5A" stroke-width="1"/>
+    <text x="105" y="66" text-anchor="middle" font-size="14" font-weight="600" fill="#2C2C2A">浏览器</text>
+    <text x="105" y="84" text-anchor="middle" font-size="11" fill="#5F5E5A">任意网络位置</text>
+
+    <path d="M174 74 L188 74" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="181" y="62" text-anchor="middle" font-size="10" fill="#5F5E5A">HTTPS</text>
+
+    <rect x="192" y="46" width="130" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="1"/>
+    <text x="257" y="66" text-anchor="middle" font-size="14" font-weight="600" fill="#633806">Caddy</text>
+    <text x="257" y="84" text-anchor="middle" font-size="11" fill="#854F0B">:443 · 自动证书</text>
+
+    <path d="M326 74 L340 74" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="333" y="62" text-anchor="middle" font-size="10" fill="#5F5E5A">回环</text>
+
+    <rect x="344" y="46" width="130" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="1"/>
+    <text x="409" y="66" text-anchor="middle" font-size="14" font-weight="600" fill="#0C447C">dsh-gate</text>
+    <text x="409" y="84" text-anchor="middle" font-size="11" fill="#185FA5">:3100 · 登录门</text>
+
+    <path d="M478 74 L492 74" fill="none" stroke="#888780" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <text x="485" y="62" text-anchor="middle" font-size="10" fill="#5F5E5A">回环</text>
+
+    <rect x="496" y="46" width="130" height="56" rx="8" fill="#EAF3DE" stroke="#3B6D11" stroke-width="1"/>
+    <text x="561" y="66" text-anchor="middle" font-size="14" font-weight="600" fill="#173404">dsh web</text>
+    <text x="561" y="84" text-anchor="middle" font-size="11" fill="#3B6D11">:3080 · 原版</text>
+
+    <text x="105" y="124" text-anchor="middle" font-size="11" fill="#5F5E5A">公网</text>
+    <text x="257" y="124" text-anchor="middle" font-size="11" fill="#5F5E5A">终止 TLS</text>
+    <text x="409" y="124" text-anchor="middle" font-size="11" fill="#5F5E5A">口令 · 限流 · 会话</text>
+    <text x="561" y="124" text-anchor="middle" font-size="11" fill="#5F5E5A">界面零改动</text>
+
+    <rect x="40" y="146" width="586" height="34" rx="8" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="1"/>
+    <text x="333" y="163" text-anchor="middle" font-size="12" fill="#444441">Caddy、网关、DSH 都在同一台机器上；网关与 DSH 只绑 127.0.0.1，浏览器接触不到 DSH 会话 Cookie</text>
+
+    <rect x="40" y="192" width="586" height="46" rx="8" fill="#EEEDFE" stroke="#534AB7" stroke-width="1"/>
+    <text x="333" y="209" text-anchor="middle" font-size="12" font-weight="600" fill="#3C3489">网关额外做的三件事</text>
+    <text x="333" y="227" text-anchor="middle" font-size="11" fill="#534AB7">下发 ownsHost 声明恢复公网设置页 · 剥掉 X-Forwarded-For 让插件市场可重启 · 会话未就绪时自动等待并刷新</text>
+
+  </g>
+</svg>

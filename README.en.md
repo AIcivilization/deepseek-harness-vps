@@ -103,11 +103,9 @@ sudo dsh-vps backup        # back up data (keeps the latest 3)
 
 ## How it runs
 
-```
-Browser ──HTTPS──▶ Caddy ──▶ dsh-gate(:3100, loopback only) ──▶ dsh web(:3080, loopback only)
-                              login gate + transparent proxy      stock DSH
-                              + server-side DSH cookie injection
-```
+<p align="center">
+  <img src="assets/architecture.svg" alt="Request path: browser to Caddy to dsh-gate to dsh web" width="680">
+</p>
 
 Both DSH and the gateway bind to 127.0.0.1 only, the user's browser never sees DSH's session cookie, and every request is proxied through after the gateway authenticates it.
 
