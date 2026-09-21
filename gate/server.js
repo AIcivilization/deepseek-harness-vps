@@ -46,12 +46,8 @@ const CADDY_SITE_FILE = process.env.CADDY_SITE_FILE || "/etc/caddy/dsh-site.conf
 const DEEPSEEK_KEY_REF = "DEEPSEEK_API_KEY"; // DSH 约定：deriveKeyRef("deepseek")
 // /setup 向导可选的常用插件（package 名即 `dsh plugin --profile web add <pkg>` 的入参）
 const PLUGIN_OPTIONS = [
-	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题（推荐）" },
-	{ id: "dsh-subscriptions", pkg: "@goodandready/dsh-subscriptions", name: "订阅接入 dsh-subscriptions", desc: "把 ChatGPT / Claude / Grok / Kimi / GLM 等 16 家订阅经 OAuth 桥接为 LLM 提供方，多账户池轮换" },
-	{ id: "dsh-task-board", pkg: "@linxin666/dsh-client-ui-task-board", name: "任务看板 dsh-task-board", desc: "Web 端任务看板，可真实执行会话、按 Host cron 定时调度" },
-	{ id: "dsh-im", pkg: "@xmanrui/dsh-im", args: ["-w"], name: "IM 接入 dsh-im", desc: "飞书 / 钉钉 / 企微 / QQ / Slack / Telegram 等 11 种 IM 机器人接入 Harness（设置 → IM机器人）" },
-	{ id: "dsh-cost-meter", pkg: "dsh-cost-meter", name: "会话费用统计 dsh-cost-meter", desc: "本会话/当日/历史费用与额度显示" },
-	{ id: "dsh-context", pkg: "dsh-context", name: "上下文洞察 dsh-context", desc: "查看当前上下文构成与演进" },
+	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题，之后想装什么都在这里装" },
+	{ id: "dsh-vps-manager", pkg: "dsh-vps-manager", name: "VPS 管理 dsh-vps-manager", desc: "在 DSH 里直接管理这台 VPS：不花 token 的查询命令、对话内终端、按风险分级确认的 AI 操作、运维菜谱库" },
 ];
 // 本产品仓库入口：放在 gate 自己的页面（登录 / 初始向导 / 启动等待），
 // 不碰 DSH 原生界面，DSH 升级不受影响。
@@ -1259,7 +1255,7 @@ ${(warnings || []).map((w) => `<p class="warn">${esc(w)}</p>`).join("")}
 <input id="k" name="apiKey" type="password" autocomplete="off" placeholder="sk-...">
 <p class="hint">现在填写最省事；跳过也可稍后在登录后的「添加 API Key」引导，或设置 → 模型 → DeepSeek 中填写。</p>
 <hr>
-<p class="hint" style="margin:2px 0 0">社区插件（默认全选，可取消；不装也完全不影响使用）</p>
+<p class="hint" style="margin:2px 0 0">预置插件（默认全选，可取消；其余插件装好后随时在插件市场里自行安装）</p>
 ${PLUGIN_OPTIONS.map((o) => `
 <label class="chk"><input type="checkbox" name="plugin" value="${o.id}" checked> <span>${esc(o.name)}<br><span class="tip">${esc(o.desc)}</span></span></label>`).join("")}
 <button type="submit">完成设置</button>

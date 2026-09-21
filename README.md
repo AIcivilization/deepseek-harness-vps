@@ -39,8 +39,8 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | --- | --- |
 | 一键安装 | `curl \| bash`，装完即 systemd 托管、开机自启 |
 | 登录门 | scrypt 口令 + HMAC 会话 Cookie + 登录限流 |
-| 浏览器初始向导 | 管理员账号、域名、DeepSeek API Key、社区插件，全程在浏览器里填完 |
-| 社区插件一键装 | 向导内置 6 款，默认全选、可取消，后台装完自动重启生效 |
+| 浏览器初始向导 | 管理员账号、域名、DeepSeek API Key、预置插件，全程在浏览器里填完 |
+| 预置插件一键装 | 向导内置 2 款，默认全选、可取消，后台装完自动重启生效 |
 | 自动 HTTPS | Caddy 自动签发并续期证书；向导里改域名即时热加载 |
 | 公网可用的原生设置页 | 设置、模型、API Key、权限策略在公网域名下照常读写 |
 | 插件市场可用 | 市场里浏览/安装插件，点「立即重启」直接生效 |
@@ -85,13 +85,12 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 ## 首次使用
 
-安装完成打开输出的地址，自动进入初始设置向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与社区插件 → 登录即用。API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
+安装完成打开输出的地址，自动进入初始设置向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与预置插件 → 登录即用。API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
-勾选的插件在后台安装（约几十秒），装完 DSH 自动重启生效。其中三款：
+勾选的插件在后台安装（约几十秒），装完 DSH 自动重启生效，共两款：
 
-- **dsh-subscriptions**：设置 → 插件 → Subscriptions 里绑定 ChatGPT / Claude / Grok / Kimi / GLM 等订阅账户，之后即可当作模型提供方使用，省下按量付费额度
-- **dsh-task-board**：左侧栏 Task Board 入口直接使用，支持真实执行会话与定时调度
-- **dsh-im**：设置 → IM机器人 里扫码或填凭据，把飞书 / 钉钉 / 企微 / QQ / Slack / Telegram 等 11 种 IM 机器人接进 Harness
+- **dsh-market**：设置页内浏览、搜索、一键安装社区插件与主题。其余插件留给你自己挑，装好后在市场里按需添加
+- **dsh-vps-manager**：在 DSH 里直接管理这台 VPS——`/vps-` 系列查询命令不经过模型、不花 token，对话内嵌终端，AI 操作按风险分级确认，另有运维菜谱库。需在 设置 → VPS Manager 中添加本机（SSH 密钥登录）
 
 ---
 

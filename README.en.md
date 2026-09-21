@@ -34,8 +34,8 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | --- | --- |
 | One-command install | `curl \| bash`, then it runs as a systemd service, started on boot |
 | Login gate | scrypt password + HMAC session cookie + rate limiting |
-| Browser setup wizard | admin account, domain, DeepSeek API key and community plugins — all filled in from the browser |
-| One-click community plugins | 6 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart |
+| Browser setup wizard | admin account, domain, DeepSeek API key and bundled plugins — all filled in from the browser |
+| One-click bundled plugins | 2 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart |
 | Automatic HTTPS | Caddy issues and renews certificates; changing the domain in the wizard hot-reloads instantly |
 | Native settings on a public domain | settings, models, API keys and permission policies read and write normally |
 | Working plugin marketplace | browse and install plugins from the marketplace, and "restart now" just works |
@@ -75,13 +75,12 @@ Removes the service, install directory, Caddy site block and the DSH data direct
 
 ## First run
 
-Open the printed URL after installation — the setup wizard starts automatically: admin username/password → (optional) domain, DeepSeek API key & community plugins → log in. Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
+Open the printed URL after installation — the setup wizard starts automatically: admin username/password → (optional) domain, DeepSeek API key & bundled plugins → log in. Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
 
-The checked plugins install in the background (tens of seconds) and DSH restarts to activate them. Three worth knowing:
+The checked plugins install in the background (tens of seconds) and DSH restarts to activate them. Two of them:
 
-- **dsh-subscriptions**: Settings → Plugins → Subscriptions to bind ChatGPT / Claude / Grok / Kimi / GLM accounts, then use them as model providers and save pay-as-you-go credits
-- **dsh-task-board**: available from the Task Board entry in the sidebar, with real session execution and cron scheduling
-- **dsh-im**: Settings → IM机器人 to scan a QR code or enter credentials, wiring 11 IM channels (Feishu, DingTalk, WeCom, QQ, Slack, Telegram and more) into Harness
+- **dsh-market**: browse, search and install community plugins and themes from Settings. Everything else is left to you — add whatever you want from the marketplace afterwards
+- **dsh-vps-manager**: manage this very VPS from inside DSH — `/vps-` queries that skip the model and cost no tokens, a terminal in the conversation, AI operations confirmed by risk level, and a recipe library. Add this machine under Settings → VPS Manager (SSH key login)
 
 ---
 
