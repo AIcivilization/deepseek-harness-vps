@@ -215,6 +215,24 @@ step4_user() {
 
 ## region: 步骤 5：dsh-gate 代码
 
+# 一次性启动令牌：初始向导在安装结束到用户首次打开浏览器之间是全网可达的，
+# 谁先提交谁就是管理员。令牌写进 state/setup.token，向导提交成功后由 gate 删除。
+generate_setup_token() {
+	SETUP_TOKEN=""
+	[[ -f "$INSTALL_ROOT/state/setup.lock" ]] && return 0
+	local tok
+	tok=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)
+	if [[ ${#tok} -lt 24 ]]; then
+		warn "启动令牌生成失败，向导将不校验令牌"
+		return 0
+	fi
+	printf '%s' "$tok" >"$INSTALL_ROOT/state/setup.token"
+	chown "$DSH_USER" "$INSTALL_ROOT/state/setup.token" 2>/dev/null || true
+	chmod 600 "$INSTALL_ROOT/state/setup.token"
+	SETUP_TOKEN="$tok"
+	log "已生成一次性启动令牌"
+}
+
 step5_gate() {
 	log "步骤 5/9：dsh-gate"
 	mkdir -p "$INSTALL_ROOT/gate" "$INSTALL_ROOT/bin"
@@ -227,6 +245,9 @@ step5_gate() {
 	# 公网域名下浏览器判定 isLoopback=false，设置页会报"设置在此浏览器中不可用"。
 	# 直接写前端静态文件解除该判定（DSH 每次响应都重读该文件，无需重启）。
 	dsh-vps ownshost on || warn "ownsHost 补丁未生效，稍后可手动运行: sudo dsh-vps ownshost on"
+	mkdir -p "$INSTALL_ROOT/state"
+	chmod 700 "$INSTALL_ROOT/state"
+	generate_setup_token
 }
 
 ## endregion
@@ -257,7 +278,11 @@ step6_caddy() {
 	local site="${DOMAIN:-:443}"
 	cat >/etc/caddy/dsh-site.conf <<EOF
 ${site} {
-	reverse_proxy 127.0.0.1:$GATE_PORT
+	reverse_proxy 127.0.0.1:$GATE_PORT {
+		# 只信 Caddy 自己看到的对端地址：显式覆盖，客户端伪造的 X-Forwarded-For 一律作废。
+		# gate 的登录限流与审计日志都读这个头，让它可被伪造等于把限流关掉。
+		header_up X-Forwarded-For {remote_host}
+	}
 }
 EOF
 	chown "$DSH_USER":caddy /etc/caddy/dsh-site.conf
@@ -404,23 +429,31 @@ step9_verify() {
 	else
 		url="https://$(detect_public_ip)"
 	fi
+	local open_url="$url"
+	[[ -n "$SETUP_TOKEN" ]] && open_url="$url/setup?token=$SETUP_TOKEN"
 
 	echo
 	echo "============================================================"
 	echo " dsh-vps 安装完成"
 	echo "------------------------------------------------------------"
 	echo " DSH 版本  : $DSH_VERSION（钉住）"
-	echo " 访问地址  : $url"
-	if [[ -z "$DOMAIN" ]]; then
+	echo " 访问地址  : $open_url"
+	if [[ -n "$SETUP_TOKEN" ]]; then
+		echo "             （初始设置需要上面的一次性令牌，别用不带令牌的地址）"
+	elif [[ -z "$DOMAIN" ]]; then
 		echo "             （未传 --domain，当前为自签证书过渡；域名可稍后在浏览器向导中填写）"
 	fi
 	echo " 服务/日志 : systemctl status dsh-gate | journalctl -u dsh-gate -f"
-	echo " 管理命令  : dsh-vps status | restart | upgrade | rollback | reset-admin | backup"
+	echo " 管理命令  : dsh-vps status | restart | upgrade | rollback | reset-admin | setup-url | backup"
 	echo "------------------------------------------------------------"
 	echo " 下一步："
 	echo " 1. 若使用域名，请先将 A 记录解析到本机（Caddy 会自动签发证书）"
-	echo " 2. 浏览器打开访问地址，自动进入初始设置向导"
+	echo " 2. 浏览器打开上面的访问地址，进入初始设置向导"
 	echo " 3. 填写管理员用户名/密码（+ 可选域名、DeepSeek API Key）→ 登录"
+	if [[ -n "$SETUP_TOKEN" ]]; then
+		echo
+		echo " 令牌只此一份，链接丢了随时重取：sudo dsh-vps setup-url"
+	fi
 	echo "============================================================"
 }
 

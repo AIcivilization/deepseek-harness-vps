@@ -40,13 +40,15 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | 一键安装 | `curl \| bash`，装完即 systemd 托管、开机自启 |
 | 登录门 | scrypt 口令 + HMAC 会话 Cookie + 登录限流 |
 | 浏览器初始向导 | 管理员账号、域名、DeepSeek API Key、预置插件，全程在浏览器里填完 |
+| 一次性启动令牌 | 向导只对持有令牌的人开放，链接随安装输出，`dsh-vps setup-url` 可重取，设置完成即作废 |
 | 预置插件一键装 | 向导内置 2 款，默认全选、可取消，后台装完自动重启生效 |
 | 自动 HTTPS | Caddy 自动签发并续期证书；向导里改域名即时热加载 |
 | 公网可用的原生设置页 | 设置、模型、API Key、权限策略在公网域名下照常读写 |
 | 插件市场可用 | 市场里浏览/安装插件，点「立即重启」直接生效 |
 | 会话自愈 | DSH 首启与插件安装需要几十秒，页面自动等待，就绪后自动进入 |
 | 安全升级 | DSH 版本钉在已验证清单内，升级走备份 → 自检 → 失败自动回滚，也可随时手动回滚 |
-| 可观测与可恢复 | `/gate/health` 直接给出崩溃原因与连续崩溃次数；`dsh-vps backup` 保留最近 3 份 |
+| 可观测与可恢复 | 本机 `/gate/health` 直接给出崩溃原因与连续崩溃次数；`dsh-vps backup` 保留最近 3 份 |
+| 收紧的暴露面 | 会话 Cookie 恒为 Secure/HttpOnly/SameSite；诊断接口只对服务器本机与已登录会话开放；服务以无特权的 dsh 用户运行并受 systemd 沙箱约束 |
 
 ---
 
@@ -85,7 +87,13 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 ## 首次使用
 
-安装完成打开输出的地址，自动进入初始设置向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与预置插件 → 登录即用。API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
+安装结束时终端会打印一条**带一次性令牌的初始设置链接**，浏览器打开它进入向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与预置插件 → 登录即用。向导只对持有令牌的人开放，令牌在设置完成后自动作废。链接丢了随时重取：
+
+```bash
+sudo dsh-vps setup-url
+```
+
+API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
 勾选的插件在后台安装（约几十秒），装完 DSH 自动重启生效，共两款：
 
@@ -104,7 +112,8 @@ sudo dsh-vps update-gate   # 拉取并重启网关自身代码（安装目录非
 sudo dsh-vps ownshost on   # 应用设置页可用性补丁（公网域名下恢复设置页）
 sudo dsh-vps selfcheck     # 跑一遍回归自检（登录 / RPC / WebSocket / 会话）
 sudo dsh-vps rollback      # 切回上一 DSH 版本
-sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置
+sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置（重新走向导并换发令牌）
+sudo dsh-vps setup-url     # 重新打印带一次性令牌的初始设置链接
 sudo dsh-vps backup        # 备份数据（保留最近 3 份）
 ```
 
@@ -121,7 +130,7 @@ DSH 与网关均只绑 127.0.0.1，用户浏览器接触不到 DSH 的会话 Coo
 - **会话自愈**：首启与插件安装期间页面显示「DeepSeek Harness 正在启动」，按 3 秒一次自检，会话就绪后自动刷新进入。
 - **设置页可用性**：DSH 前端按页面 hostname 判断是否为操作者本机浏览器，公网域名下会隐藏设置。网关随页面下发官方支持的 `__DSH_TRANSPORT__.ownsHost` 声明，设置页、模型、API Key 与权限策略随之恢复。`--trusted-host` 只负责打开网络围栏，两者是两道独立的门。
 - **插件市场重启**：市场的「立即重启」由网关接管——它剥掉 Caddy 加的 `X-Forwarded-For`（该头会触发 DSH 的回环校验而 403），并由网关重启自己托管的 DSH 子进程，保证会话兑换链路不中断。
-- **排障入口**：`sudo ss -ltnp | grep 3080` 查残留 DSH 进程；`/gate/health` 直接给出 `lastError` / `lastExit` / `crashStreak`。
+- **排障入口**：`sudo ss -ltnp | grep 3080` 查残留 DSH 进程；服务器上执行 `curl -s http://127.0.0.1:3100/gate/health` 可拿到 `lastError` / `lastExit` / `crashStreak`（该接口只对服务器本机与已登录会话开放）
 
 ---
 

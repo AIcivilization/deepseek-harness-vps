@@ -8,7 +8,8 @@
 #   upgrade [version]   升级 DSH 版本（默认 latest_verified）；--latest 强上 npm 最新版
 #   update-gate        更新 gate 代码本身（gate/server.js）并重启
 #   rollback            符号链接切回上一版本并重启
-#   reset-admin         删除 admin.json 与 setup.lock，重新走向导（应急）
+#   reset-admin         删除 admin.json 与 setup.lock，重新走向导并换发令牌（应急）
+#   setup-url           打印初始设置链接（含一次性令牌）
 #   backup              打包 DSH_HOME + state 到 backups/（保留最近 3 份）
 #   selfcheck           手动触发升级回归自检探针
 
@@ -271,6 +272,61 @@ cmd_rollback() {
 
 ## endregion
 
+## region: 启动令牌
+
+# 生成一次性令牌并写入 state/setup.token；令牌经 $SETUP_TOKEN 返回。
+new_setup_token() {
+	local tok
+	tok=$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32)
+	if [[ ${#tok} -lt 24 ]]; then
+		warn "启动令牌生成失败，向导将不校验令牌"
+		SETUP_TOKEN=""
+		return 1
+	fi
+	mkdir -p "$ROOT/state"
+	chmod 700 "$ROOT/state"
+	printf '%s' "$tok" >"$ROOT/state/setup.token"
+	local owner
+	owner=$(stat -c %U "$ROOT/state" 2>/dev/null || echo dsh)
+	chown "$owner" "$ROOT/state/setup.token" 2>/dev/null || true
+	chmod 600 "$ROOT/state/setup.token"
+	SETUP_TOKEN="$tok"
+}
+
+# 访问地址：优先 gate.env 的 DSH_TRUSTED_HOST（--trusted-host 的实际取值），回退 config.json
+current_host() {
+	local host=""
+	if [[ -f "$ROOT/state/gate.env" ]]; then
+		host=$(sed -n 's/^DSH_TRUSTED_HOST=//p' "$ROOT/state/gate.env" | head -1)
+		host=${host%\"}; host=${host#\"}
+		host=${host%\'}; host=${host#\'}
+	fi
+	if [[ -z "$host" && -f "$ROOT/state/config.json" ]]; then
+		host=$(sed -n 's/.*"domain"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT/state/config.json" | head -1)
+	fi
+	printf '%s' "$host"
+}
+
+cmd_setup_url() {
+	require_root
+	local host token=""
+	host=$(current_host)
+	[[ -n "$host" ]] || die "无法确定访问地址（$ROOT/state/gate.env 缺失）；可手工拼接 https://<你的域名>/setup?token=<令牌>"
+	[[ -f "$ROOT/state/setup.token" ]] && token=$(tr -d '[:space:]' <"$ROOT/state/setup.token")
+	if [[ -z "$token" ]]; then
+		if [[ -f "$ROOT/state/setup.lock" ]]; then
+			log "初始设置已完成，无需令牌。直接打开 https://$host 登录。"
+		else
+			warn "未找到启动令牌（$ROOT/state/setup.token），向导当前不校验令牌；直接打开 https://$host 设置。"
+		fi
+		return 0
+	fi
+	log "初始设置链接（令牌一次性，设置完成后自动失效）："
+	echo "  https://$host/setup?token=$token"
+}
+
+## endregion
+
 ## region: reset-admin
 
 cmd_reset_admin() {
@@ -283,7 +339,10 @@ cmd_reset_admin() {
 		[[ "$ans" == "y" || "$ans" == "Y" ]] || die "已取消"
 	fi
 	rm -f "$ROOT/state/admin.json" "$ROOT/state/setup.lock"
-	log "已重置。打开站点首页即可重新进入初始设置向导。"
+	# 重开向导等于重新暴露 /setup：必须换发令牌，否则旧令牌（可能已泄露）仍然有效
+	new_setup_token || true
+	log "已重置，并已换发启动令牌。"
+	cmd_setup_url
 }
 
 ## endregion
@@ -403,7 +462,8 @@ dsh-vps 管理命令
   update-gate         更新 gate 自身代码（gate/server.js）并重启
   ownshost [on|off|status]  设置页可用性补丁（公网域名下解除"设置不可用"）
   rollback            切回上一 DSH 版本（秒级，不依赖网络）
-  reset-admin [--yes] 删除管理员与向导锁，重新走初始设置
+  reset-admin [--yes] 删除管理员与向导锁，重新走初始设置（换发令牌）
+  setup-url          打印初始设置链接（含一次性令牌）
   backup              备份数据到 /opt/dsh-vps/backups/（保留 3 份）
   selfcheck           手动触发回归自检探针
 EOF
@@ -417,6 +477,7 @@ update-gate) cmd_update_gate ;;
 ownshost) shift; cmd_ownshost "$@" ;;
 rollback) cmd_rollback ;;
 reset-admin) shift; cmd_reset_admin "$@" ;;
+setup-url) cmd_setup_url ;;
 backup) cmd_backup ;;
 selfcheck) cmd_selfcheck ;;
 "" | -h | --help) usage ;;

@@ -182,17 +182,32 @@ function sanitizedPath(url) {
 	return rest ? `/?${rest}` : "/";
 }
 
+// gate 自己的页面一律带这组头。frame-ancestors 'none' 挡点击劫持，
+// base-uri / form-action 限制在同源；页面用内联 style/script，故放行 unsafe-inline。
+const SECURITY_HEADERS = {
+	"x-content-type-options": "nosniff",
+	"x-frame-options": "DENY",
+	"referrer-policy": "no-referrer",
+	"content-security-policy":
+		"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+};
+
 function sendHtml(res, status, html, extraHeaders) {
 	res.writeHead(status, {
 		"content-type": "text/html; charset=utf-8",
 		"cache-control": "no-store",
+		...SECURITY_HEADERS,
 		...extraHeaders,
 	});
 	res.end(html);
 }
 
 function sendText(res, status, text) {
-	res.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+	res.writeHead(status, {
+		"content-type": "text/plain; charset=utf-8",
+		"cache-control": "no-store",
+		"x-content-type-options": "nosniff",
+	});
 	res.end(text);
 }
 
@@ -279,9 +294,9 @@ function sessionUser(req) {
 
 function sessionCookieHeader(req, username) {
 	const expiresMs = Date.now() + SESSION_TTL_MS;
-	const secure =
-		process.env.GATE_COOKIE_SECURE === "1" ||
-		String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https";
+	// 站点一律 HTTPS（Caddy 自动签发，或自签过渡），Secure 无条件加上。
+	// 不读 x-forwarded-proto：那是个可被伪造的请求头，值得信任的只有"这里就是 HTTPS"这件事本身。
+	const secure = process.env.GATE_COOKIE_SECURE !== "0";
 	return [
 		`${SESSION_COOKIE}=${signSession(username, expiresMs)}`,
 		`Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
@@ -655,10 +670,37 @@ async function handleLogin(req, res) {
 function handleLogout(req, res) {
 	res.writeHead(303, {
 		location: "/login",
-		"set-cookie": `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`,
+		"set-cookie": `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax; Secure`,
 		"cache-control": "no-store",
 	});
 	res.end();
+}
+
+/** 直连回环的请求：dsh-vps CLI、install.sh 的健康检查都走这条路。 */
+function isLoopbackRequest(req) {
+	const ip = req.socket.remoteAddress || "";
+	return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+}
+
+function handleSelfcheckGuarded(req, res) {
+	if (!isLoopbackRequest(req)) {
+		sendText(res, 403, "forbidden");
+		return;
+	}
+	return handleSelfcheck(req, res);
+}
+
+/**
+ * /gate/health 会暴露域名、DSH 端口、pid、会话到期时间与崩溃诊断，不能对公网开放。
+ * 放行两类：回环（CLI / install.sh 探活）与已登录会话（启动等待页轮询）。
+ * 等待页只在登录后才会出现——未登录请求一律被 303 到登录页，不受影响。
+ */
+function handleHealthGuarded(req, res) {
+	if (!isLoopbackRequest(req) && !sessionUser(req)) {
+		sendText(res, 403, "forbidden");
+		return;
+	}
+	return handleHealth(req, res);
 }
 
 function handleHealth(req, res) {
@@ -966,6 +1008,48 @@ function setupOpen() {
 	return !fs.existsSync(setupLockPath());
 }
 
+// ---- 启动令牌 ----
+// 从 install.sh 跑完到用户第一次打开浏览器之间，/setup 对全网开放：谁先提交谁就是
+// 管理员。install.sh 因此生成一个一次性令牌写进 state/setup.token，并打印带令牌的
+// URL；向导提交成功后立刻删除令牌文件，令牌永久失效。
+// 没有令牌文件时（手工部署、令牌被清），行为退回旧版的开放向导，不锁死用户。
+function setupTokenPath() {
+	return path.join(STATE_DIR, "setup.token");
+}
+
+function loadSetupToken() {
+	try {
+		const token = fs.readFileSync(setupTokenPath(), "utf8").trim();
+		return /^[A-Za-z0-9]{16,64}$/.test(token) ? token : null;
+	} catch {
+		return null;
+	}
+}
+
+function clearSetupToken() {
+	try {
+		fs.rmSync(setupTokenPath());
+		log("setup token consumed");
+	} catch {
+		/* 已不存在 */
+	}
+}
+
+function setupTokenValid(provided) {
+	const expected = loadSetupToken();
+	if (!expected) return true; // 未启用令牌
+	if (typeof provided !== "string" || provided.length !== expected.length) return false;
+	return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
+}
+
+/** 令牌可来自查询串（GET / 重定向）或表单字段（POST）。 */
+function providedSetupToken(req, form) {
+	const fromForm = form ? String(form.get("token") || "") : "";
+	if (fromForm) return fromForm;
+	const q = (req.url || "").split("?")[1];
+	return q ? String(new URLSearchParams(q).get("token") || "") : "";
+}
+
 /** 服务端身份调用 DSH 特权 RPC（走已注入的会话 Cookie，等价于"登录态探测"）。 */
 function dshRpc(method, args) {
 	return new Promise((resolve, reject) => {
@@ -1094,9 +1178,21 @@ function persistTrustedHost(domain) {
  * 更新运行期 trustedHost 并持久化 → 重启 DSH 子进程（自动重新捕获 token + 兑换）。
  * 站点文件由 install.sh 预创建并属主 dsh（组 caddy 可读），gate 无需 root。
  */
+// 站点块模板：install.sh 写初始块、gate 改域名时重写，两边必须是同一份。
+// header_up X-Forwarded-For {remote_host} 显式覆盖客户端可能伪造的 XFF —— gate 的
+// 登录限流与审计日志都读这个头，能被伪造就等于把限流关掉。
+function caddySiteBlock(host) {
+	return (
+		`${host} {\n` +
+		`\treverse_proxy 127.0.0.1:${GATE_PORT} {\n` +
+		`\t\theader_up X-Forwarded-For {remote_host}\n` +
+		`\t}\n` +
+		`}\n`
+	);
+}
+
 async function applyDomainChange(domain) {
-	const siteBlock = `${domain} {\n\treverse_proxy 127.0.0.1:${GATE_PORT}\n}\n`;
-	fs.writeFileSync(CADDY_SITE_FILE, siteBlock);
+	fs.writeFileSync(CADDY_SITE_FILE, caddySiteBlock(domain));
 	try {
 		await caddyReload();
 		log(`caddy reloaded with site ${domain}`);
@@ -1200,7 +1296,7 @@ function currentDomainHint(req) {
 	return "";
 }
 
-function setupPage({ error, username, domain, warnings }) {
+function setupPage({ error, username, domain, warnings, token }) {
 	return `<!doctype html>
 <html lang="zh">
 <head>
@@ -1239,6 +1335,7 @@ ${REPO_CSS}
 ${error ? `<p class="err">${esc(error)}</p>` : ""}
 ${(warnings || []).map((w) => `<p class="warn">${esc(w)}</p>`).join("")}
 <form method="post" action="/setup">
+${token ? `<input type="hidden" name="token" value="${esc(token)}">` : ""}
 <label for="u">管理员用户名</label>
 <input id="u" name="username" value="${esc(username || "")}" autocomplete="username" required>
 <p class="hint">3-32 位字母、数字或下划线</p>
@@ -1266,22 +1363,60 @@ ${repoLink()}
 </html>`;
 }
 
+/** 缺少/错误的启动令牌：不给向导表单，只告诉用户去哪里拿链接。 */
+function setupTokenPage() {
+	return `<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>dsh-vps · 需要启动令牌</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#0b0e14;color:#dbe2ea;font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{width:min(420px,92vw);padding:32px 28px;border:1px solid #1f2733;border-radius:12px;background:#11161f}
+h1{margin:0 0 4px;font-size:20px;letter-spacing:.5px}
+.sub{margin:0 0 20px;color:#7d8a9c;font-size:13px}
+.err{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#2a1215;color:#f87171;font-size:13px}
+.hint{margin:2px 0 0;font-size:12px;color:#5c6b7e}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+${REPO_CSS}
+</style>
+</head>
+<body>
+<main>
+<h1>dsh-vps 初始设置</h1>
+<p class="sub">初始设置向导需要启动令牌</p>
+<p class="err">当前链接缺少启动令牌或令牌不正确。向导只对持有令牌的人开放。</p>
+<p style="font-size:14px;color:#9aa7b8;margin:0 0 4px">在服务器上执行下面任一命令获取带令牌的链接：</p>
+<p style="margin:6px 0 0"><code style="display:block;padding:9px 10px;border-radius:8px;background:#0d1219;color:#93c5fd;font-size:13px;overflow-x:auto">sudo dsh-vps setup-url</code></p>
+<p style="margin:6px 0 0"><code style="display:block;padding:9px 10px;border-radius:8px;background:#0d1219;color:#93c5fd;font-size:13px;overflow-x:auto">sudo journalctl -u dsh-gate | grep setup-url</code></p>
+<p class="hint" style="margin:16px 0 0">安装结束时该链接已打印在终端里。</p>
+${repoLink()}
+</main>
+</body>
+</html>`;
+}
+
 async function handleSetup(req, res) {
 	if (!setupOpen()) {
 		sendText(res, 404, "not found");
 		return;
 	}
 	if (req.method === "GET" || req.method === "HEAD") {
-		sendHtml(res, 200, setupPage({ domain: currentDomainHint(req) }));
+		const token = providedSetupToken(req, null);
+		if (!setupTokenValid(token)) {
+			log("setup page rejected: missing or wrong token");
+			sendHtml(res, 403, setupTokenPage());
+			return;
+		}
+		sendHtml(res, 200, setupPage({ domain: currentDomainHint(req), token }));
 		return;
 	}
 	if (req.method !== "POST") {
 		sendText(res, 405, "method not allowed");
-		return;
-	}
-	const ip = clientIp(req);
-	if (setupRateLimited(ip)) {
-		sendHtml(res, 429, setupPage({ error: "尝试次数过多，请稍后再试。" }));
 		return;
 	}
 	let form;
@@ -1289,6 +1424,19 @@ async function handleSetup(req, res) {
 		form = new URLSearchParams(await readBody(req, 64 * 1024));
 	} catch {
 		sendText(res, 400, "bad request");
+		return;
+	}
+	// 令牌校验放在限流之前：拿不到令牌的人不该消耗掉真正的密码尝试额度，
+	// 反之只带错误令牌的请求也刷不掉限流窗口。
+	const token = providedSetupToken(req, form);
+	if (!setupTokenValid(token)) {
+		log("setup submit rejected: missing or wrong token");
+		sendHtml(res, 403, setupTokenPage());
+		return;
+	}
+	const ip = clientIp(req);
+	if (setupRateLimited(ip)) {
+		sendHtml(res, 429, setupPage({ error: "尝试次数过多，请稍后再试。", token }));
 		return;
 	}
 	const username = String(form.get("username") || "").trim();
@@ -1303,7 +1451,7 @@ async function handleSetup(req, res) {
 
 	const redisplay = (error) => {
 		recordSetupFailure(ip);
-		sendHtml(res, 200, setupPage({ error, username, domain }));
+		sendHtml(res, 200, setupPage({ error, username, domain, token }));
 	};
 	if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) return redisplay("用户名须为 3-32 位字母、数字或下划线。");
 	if (password.length < 12) return redisplay("密码至少 12 位。");
@@ -1323,6 +1471,7 @@ async function handleSetup(req, res) {
 				error: `域名配置失败：${err.message}。管理员账号已保存，请修正后重新提交。`,
 				username,
 				domain,
+				token,
 			}));
 			return;
 		}
@@ -1339,6 +1488,7 @@ async function handleSetup(req, res) {
 	}
 
 	fs.writeFileSync(setupLockPath(), JSON.stringify({ completedAt: Date.now(), username }, null, 2), { mode: 0o600 });
+	clearSetupToken();
 	log("setup completed; wizard locked");
 
 	if (plugins.length) {
@@ -1347,7 +1497,7 @@ async function handleSetup(req, res) {
 	}
 
 	if (warnings.length) {
-		sendHtml(res, 200, setupPage({ warnings, username, domain }));
+		sendHtml(res, 200, setupPage({ warnings, username, domain, token }));
 		return;
 	}
 	if (domain && domain !== requestAuthority(req.headers)) {
@@ -1395,16 +1545,6 @@ async function handleSelfcheck(req, res) {
 }
 
 /** selfcheck 仅限回环调用（dsh-vps upgrade 在本机执行），防止公网探测内部状态。 */
-function handleSelfcheckGuarded(req, res) {
-	const ip = req.socket.remoteAddress || "";
-	const loopback = ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
-	if (!loopback) {
-		sendText(res, 403, "forbidden");
-		return;
-	}
-	return handleSelfcheck(req, res);
-}
-
 //#endregion
 
 //#region CLI：--set-admin（安装/应急重置用）
@@ -1450,7 +1590,7 @@ function main() {
 			.then(async () => {
 				if (pathname === "/login") return handleLogin(req, res);
 				if (pathname === "/logout") return handleLogout(req, res);
-				if (pathname === "/gate/health") return handleHealth(req, res);
+				if (pathname === "/gate/health") return handleHealthGuarded(req, res);
 				if (pathname === "/gate/selfcheck") return handleSelfcheckGuarded(req, res);
 				if (pathname === "/setup") return handleSetup(req, res);
 				if (!loadAdmin()) {
@@ -1460,7 +1600,10 @@ function main() {
 						return;
 					}
 					if (setupOpen()) {
-						res.writeHead(303, { location: "/setup", "cache-control": "no-store" });
+						// 带上启动令牌，免得用户先看到"缺少令牌"页再手工拼 URL
+						const tok = loadSetupToken();
+						const target = tok ? `/setup?token=${encodeURIComponent(tok)}` : "/setup";
+						res.writeHead(303, { location: target, "cache-control": "no-store" });
 						res.end();
 						return;
 					}

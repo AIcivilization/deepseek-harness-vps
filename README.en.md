@@ -35,13 +35,15 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | One-command install | `curl \| bash`, then it runs as a systemd service, started on boot |
 | Login gate | scrypt password + HMAC session cookie + rate limiting |
 | Browser setup wizard | admin account, domain, DeepSeek API key and bundled plugins — all filled in from the browser |
+| One-time setup token | the wizard only answers to holders of the token; the link is printed at install time, re-printable, and voided once setup completes |
 | One-click bundled plugins | 2 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart |
 | Automatic HTTPS | Caddy issues and renews certificates; changing the domain in the wizard hot-reloads instantly |
 | Native settings on a public domain | settings, models, API keys and permission policies read and write normally |
 | Working plugin marketplace | browse and install plugins from the marketplace, and "restart now" just works |
 | Self-healing startup | the first boot and plugin installs take tens of seconds; the page waits and enters on its own |
 | Safe upgrades | DSH is pinned to a verified version list; upgrades go backup → self-check → automatic rollback on failure, plus manual rollback at any time |
-| Observable and recoverable | `/gate/health` reports the crash reason and crash streak; `dsh-vps backup` keeps the latest 3 copies |
+| Observable and recoverable | `/gate/health` on the server reports the crash reason and crash streak; `dsh-vps backup` keeps the latest 3 copies |
+| Tightened exposure | session cookies are always Secure/HttpOnly/SameSite; diagnostics are reachable only from the server itself or an authenticated session; the service runs as the unprivileged `dsh` user under systemd sandboxing |
 
 ---
 
@@ -75,7 +77,13 @@ Removes the service, install directory, Caddy site block and the DSH data direct
 
 ## First run
 
-Open the printed URL after installation — the setup wizard starts automatically: admin username/password → (optional) domain, DeepSeek API key & bundled plugins → log in. Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
+Installation prints a **setup link carrying a one-time token** — open it to reach the wizard: admin username/password → (optional) domain, DeepSeek API key & bundled plugins → log in. The wizard only answers to holders of the token, and the token is voided once setup completes. Lost the link? Print it again:
+
+```bash
+sudo dsh-vps setup-url
+```
+
+Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
 
 The checked plugins install in the background (tens of seconds) and DSH restarts to activate them. Two of them:
 
@@ -94,7 +102,8 @@ sudo dsh-vps update-gate   # pull and restart the gateway code itself (no git re
 sudo dsh-vps ownshost on   # apply the settings-page patch (restores settings on a public domain)
 sudo dsh-vps selfcheck     # run the regression self-check (login / RPC / WebSocket / session)
 sudo dsh-vps rollback      # switch back to the previous DSH version
-sudo dsh-vps reset-admin   # emergency reset if you lose the admin password
+sudo dsh-vps reset-admin   # emergency reset if you lose the admin password (re-runs the wizard, new token)
+sudo dsh-vps setup-url     # re-print the setup link with its one-time token
 sudo dsh-vps backup        # back up data (keeps the latest 3)
 ```
 
@@ -111,7 +120,7 @@ Both DSH and the gateway bind to 127.0.0.1 only, the user's browser never sees D
 - **Self-healing startup**: during first boot and plugin installs the page shows "DeepSeek Harness 正在启动", polls health every 3s and reloads itself as soon as the session is ready.
 - **Settings availability**: DSH's frontend decides "is this the operator's own browser" from the page hostname and hides settings on a public domain. The gateway serves the officially supported `__DSH_TRANSPORT__.ownsHost` declaration alongside the page, which restores settings, models, API keys and permission policies. `--trusted-host` only opens the network fence — the two are separate gates.
 - **Marketplace restart**: "restart now" is handled by the gateway — it strips Caddy's `X-Forwarded-For` (which trips DSH's loopback check and 403s) and restarts the DSH child process it owns, keeping session exchange intact.
-- **Troubleshooting entry points**: `sudo ss -ltnp | grep 3080` finds stale DSH processes; `/gate/health` reports `lastError`, `lastExit` and `crashStreak` directly.
+- **Troubleshooting entry points**: `sudo ss -ltnp | grep 3080` finds stale DSH processes; `curl -s http://127.0.0.1:3100/gate/health` on the server reports `lastError`, `lastExit` and `crashStreak` (that endpoint answers only to the server itself or an authenticated session).
 
 ---
 

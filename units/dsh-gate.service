@@ -19,8 +19,25 @@ ExecStart=__NODE_BIN__ /opt/dsh-vps/gate/server.js
 Restart=always
 RestartSec=2
 TimeoutStopSec=10
+
+# 加固：只取不改变文件系统视图的那些。
+# 刻意不设 ProtectSystem=strict / ProtectHome —— gate 会 spawn `dsh plugin add`
+# （pnpm）与 DSH 自身，它们要写 /home/dsh 下的缓存与数据目录；一旦被隐藏，
+# 表现是插件装不上、DSH 起不来，比不加更难排查。等有了真机回归再考虑收紧。
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+# 服务以 dsh 用户运行，本不需要任何 capability；显式清空，进程无法再取得特权
+CapabilityBoundingSet=
 
 [Install]
 WantedBy=multi-user.target
