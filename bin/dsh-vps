@@ -10,6 +10,8 @@
 #   rollback            符号链接切回上一版本并重启
 #   reset-admin         删除 admin.json 与 setup.lock，重新走向导并换发令牌（应急）
 #   setup-url           打印初始设置链接（含一次性令牌）
+#   vpn                 仅我可访问：WireGuard 隧道（setup/add/revoke/list/status/on/off）
+#   tunnel              仅我可访问：SSH 本地端口转发（零安装，打印用法）
 #   backup              打包 DSH_HOME + state 到 backups/（保留最近 3 份）
 #   selfcheck           手动触发升级回归自检探针
 
@@ -75,6 +77,15 @@ cmd_update_gate() {
 	cp -p "$ROOT/gate/server.js" "$ROOT/gate/server.js.bak" && log "已备份旧版: $ROOT/gate/server.js.bak"
 	mv "$tmp" "$ROOT/gate/server.js"
 	chmod 644 "$ROOT/gate/server.js"
+	# 站点块模板与 gate 同源（install.sh、dsh-vps vpn 都用它），顺手同步（幂等）
+	local sb="$ROOT/gate/site-block.update.js"
+	if curl -fsSL --max-time 30 "$RAW_BASE/gate/site-block.js" -o "$sb" && node --check "$sb"; then
+		mv "$sb" "$ROOT/gate/site-block.js"
+		chmod 644 "$ROOT/gate/site-block.js"
+	else
+		rm -f "$sb"
+		warn "gate/site-block.js 未更新（保留现有版本）"
+	fi
 	log "重启 $SERVICE ..."
 	systemctl restart "$SERVICE"
 	sleep 3
@@ -128,10 +139,10 @@ cmd_status() {
 		cur=$(current_version)
 		if [[ -n "$latest" && "$latest" != "$cur" ]]; then
 			if printf '%s\n%s\n' "$cur" "$latest" | sort -V | tail -1 | grep -qx "$latest"; then
-				echo "== 提示：有新验证版本 $latest（当前 $cur），运行 sudo dsh-vps upgrade 升级 =="
+				echo "== 提示：有新验证版本 ${latest}（当前 ${cur}），运行 sudo dsh-vps upgrade 升级 =="
 			fi
 		else
-			echo "== 已是最新验证版本（$cur） =="
+			echo "== 已是最新验证版本（${cur}） =="
 		fi
 	else
 		echo "== 版本表暂不可达（离线或仓库未发布），跳过升级提示 =="
@@ -145,7 +156,7 @@ cmd_status() {
 cmd_selfcheck() {
 	local out
 	out=$(curl -fsS --max-time 15 "$SELFCHECK_URL" 2>/dev/null) || {
-		warn "selfcheck 探针不可达（gate 未运行？先 sudo systemctl restart $SERVICE）"
+		warn "selfcheck 探针不可达（gate 未运行？先 sudo systemctl restart ${SERVICE}）"
 		return 1
 	}
 	printf '%s\n' "$out"
@@ -201,18 +212,18 @@ cmd_upgrade() {
 		# 默认：已验证版本表的 latest_verified
 		local versions
 		versions=$(curl -fsSL --max-time 10 "$VERSIONS_URL" 2>/dev/null) \
-			|| die "无法获取版本表（$VERSIONS_URL）。可显式指定版本：dsh-vps upgrade <version>"
+			|| die "无法获取版本表（${VERSIONS_URL}）。可显式指定版本：dsh-vps upgrade <version>"
 		target=$(printf '%s' "$versions" | sed -n 's/.*"latest_verified": *"\([^"]*\)".*/\1/p' | head -1)
 		[[ -n "$target" ]] || die "版本表中没有 latest_verified 字段"
 		# min_gate 提示（gate 无版本戳，仅提醒人工确认）
 		if printf '%s' "$versions" | grep -q "\"dsh\": *\"$target\""; then
 			local min_gate
 			min_gate=$(printf '%s' "$versions" | grep -o "\"min_gate\": *\"[^\"]*\"" | head -1 | sed 's/.*: *"\(.*\)"/\1/')
-			[[ -n "$min_gate" ]] && warn "该版本要求 gate >= $min_gate，请确认 gate 代码已同步更新"
+			[[ -n "$min_gate" ]] && warn "该版本要求 gate >= ${min_gate}，请确认 gate 代码已同步更新"
 		fi
 	fi
 
-	[[ "$target" == "$cur" ]] && { log "已是 $target，无需升级"; exit 0; }
+	[[ "$target" == "$cur" ]] && { log "已是 ${target}，无需升级"; exit 0; }
 	log "目标版本: $target"
 
 	# 1. 备份（防数据格式不向前兼容）
@@ -236,7 +247,7 @@ cmd_upgrade() {
 
 	# 4. 回归自检（重试 3 次）
 	if wait_selfcheck 3; then
-		log "升级成功：$cur -> $target（自检通过）"
+		log "升级成功：$cur -> ${target}（自检通过）"
 	else
 		warn "自检失败，自动回滚到 $cur ..."
 		switch_version "$cur"
@@ -352,7 +363,7 @@ cmd_reset_admin() {
 cmd_restart() {
 	require_root
 	systemctl restart "$SERVICE"
-	log "已重启 $SERVICE（DSH 子进程将自动重启并重新兑换会话）"
+	log "已重启 ${SERVICE}（DSH 子进程将自动重启并重新兑换会话）"
 }
 
 ## endregion
@@ -375,7 +386,7 @@ ownshost_apply() { # $1=on|off；stdout: patched / present / off
 	local idx
 	idx=$(ownshost_index)
 	if [[ ! -f "$idx" ]]; then
-		warn "未找到前端 index.html（$idx），跳过 ownsHost 补丁"
+		warn "未找到前端 index.html（${idx}），跳过 ownsHost 补丁"
 		return 1
 	fi
 	local tmp rc=0
@@ -452,6 +463,400 @@ cmd_ownshost() {
 
 ## endregion
 
+## region: 仅我可访问
+
+# 两种办法，目标一致：让公网访问不到登录页。
+#
+#   1) vpn    WireGuard 自建隧道。给每台设备发一个我们分配的隧道地址（10.7.0.x），
+#             服务端只放行这个网段。出口 IP 怎么变都不影响——它根本不参与判断。
+#   2) tunnel SSH 本地端口转发。零安装，适合只在电脑上用的场景。
+#
+# 不做公网出口 IP 白名单：出口 IP 不是身份，换网络 / 宽带重拨就变，会把使用者
+# 自己关在门外。隧道地址由我们分配，永不变化。
+#
+# 分离隧道：不开 ip_forward、不做 NAT。这台机器只提供 DSH 访问通道，不是全流量 VPN。
+
+VPN_IF="wg0"
+VPN_SUBNET_DEFAULT="10.7.0.0/24"
+VPN_PORT_DEFAULT=51820
+VPN_DIR="$ROOT/state/vpn"     # 服务端密钥 + 每台设备的记录与客户端配置
+VPN_ENV="$ROOT/state/vpn.env" # DSHVPS_VPN=on|off / DSHVPS_VPN_SUBNET
+WG_DIR="/etc/wireguard"
+WG_CONF="$WG_DIR/$VPN_IF.conf"
+
+vpn_env() { # 输出 on|off
+	if [[ -f "$VPN_ENV" ]] && grep -qx 'DSHVPS_VPN=on' "$VPN_ENV"; then
+		printf 'on'
+	else
+		printf 'off'
+	fi
+}
+
+vpn_subnet() {
+	local s=""
+	[[ -f "$VPN_ENV" ]] && s=$(sed -n 's/^DSHVPS_VPN_SUBNET=//p' "$VPN_ENV" | head -1)
+	printf '%s' "${s:-$VPN_SUBNET_DEFAULT}"
+}
+
+vpn_listen_port() {
+	local p=""
+	[[ -f "$WG_CONF" ]] && p=$(sed -n 's/^[[:space:]]*ListenPort[[:space:]]*=[[:space:]]*//p' "$WG_CONF" | head -1)
+	printf '%s' "${p:-$VPN_PORT_DEFAULT}"
+}
+
+# state/ 属主通常是 dsh（gate 运行身份）。vpn.env 由 root 写入后要交还属主，
+# 否则向导改域名时 gate 读不到，隧道策略会被静默丢掉。
+vpn_state_owner() { stat -c %U "$ROOT/state" 2>/dev/null || echo dsh; }
+
+vpn_set_mode() { # $1=on|off
+	local mode="$1" owner
+	owner=$(vpn_state_owner)
+	mkdir -p "$ROOT/state"
+	printf 'DSHVPS_VPN=%s\nDSHVPS_VPN_SUBNET=%s\n' "$mode" "$(vpn_subnet)" >"$VPN_ENV"
+	chown "$owner" "$VPN_ENV" 2>/dev/null || true
+	chmod 600 "$VPN_ENV"
+}
+
+site_block_js() {
+	if [[ ! -f "$ROOT/gate/site-block.js" ]]; then
+		log "缺少 gate/site-block.js，拉取一份..."
+		curl -fsSL --max-time 30 "$RAW_BASE/gate/site-block.js" -o "$ROOT/gate/site-block.js" \
+			|| die "拉取失败（离线？可稍后运行: sudo dsh-vps update-gate）"
+		chmod 644 "$ROOT/gate/site-block.js"
+	fi
+	printf '%s' "$ROOT/gate/site-block.js"
+}
+
+# 重写 Caddy 站点块并热加载。root 运行，直接 systemctl reload，不必绕 admin API。
+vpn_apply_site() {
+	require_root
+	local host js
+	host=$(current_host)
+	[[ -n "$host" ]] || die "无法确定站点地址（$ROOT/state/gate.env 缺失）"
+	js=$(site_block_js)
+	node "$js" "$host" "$ROOT" "$GATE_PORT" >/etc/caddy/dsh-site.conf || die "生成站点块失败"
+	chown "$(vpn_state_owner)":caddy /etc/caddy/dsh-site.conf 2>/dev/null || true
+	chmod 640 /etc/caddy/dsh-site.conf
+	systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
+}
+
+vpn_endpoint_host() { # 客户端 Endpoint 用的主机名：域名优先，其次公网 IP
+	local h
+	h=$(current_host)
+	if [[ -z "$h" ]]; then
+		h=$(curl -4 -fsSL --max-time 5 https://api.ipify.org 2>/dev/null | tr -d '[:space:]' || true)
+	fi
+	[[ -n "$h" ]] || h=$(hostname -I 2>/dev/null | awk '{print $1}')
+	printf '%s' "$h"
+}
+
+vpn_next_ip() { # 输出下一个未占用的隧道地址（如 10.7.0.2）
+	local subnet prefix last=1 f addr oct
+	subnet=$(vpn_subnet)
+	prefix="${subnet%.*}."
+	for f in "$VPN_DIR"/peers/*.env; do
+		[[ -f "$f" ]] || continue
+		addr=$(sed -n 's/^ADDRESS=//p' "$f" | head -1)
+		addr=${addr%/*}
+		oct=${addr##*.}
+		if [[ "$oct" =~ ^[0-9]+$ ]] && ((oct > last)); then last=$oct; fi
+	done
+	printf '%s%s' "$prefix" "$((last + 1))"
+}
+
+# 增量同步给内核，不重启接口（重启会掐掉已连着的设备）
+vpn_wg_syncconf() {
+	wg syncconf "$VPN_IF" <(wg-quick strip "$WG_CONF") \
+		|| die "同步隧道配置失败（wg syncconf）；可尝试 systemctl restart wg-quick@$VPN_IF"
+}
+
+vpn_conf_drop_peer() { # $1=名字：按注释标记整段移除 [Peer]
+	local tmp
+	tmp=$(mktemp "${TMPDIR:-/tmp}/dshvps-wg.XXXXXX")
+	awk -v want="# dsh-vps peer: $1" '
+		/^\[/ { flush() }
+		{ buf[++n] = $0 }
+		END { flush() }
+		function flush(   i, keep) {
+			if (n == 0) return
+			keep = 1
+			for (i = 1; i <= n; i++) if (index(buf[i], want) > 0) keep = 0
+			if (keep) for (i = 1; i <= n; i++) print buf[i]
+			n = 0
+		}
+	' "$WG_CONF" >"$tmp"
+	mv "$tmp" "$WG_CONF"
+	chmod 600 "$WG_CONF"
+}
+
+vpn_peer_conf() { # $1=名字 $2=地址 $3=客户端私钥 $4=服务端公钥
+	local subnet
+	subnet=$(vpn_subnet)
+	cat <<EOF
+# dsh-vps 客户端配置 · $1
+# 分离隧道：只有访问 $subnet 会走这台 VPS，其余流量照常走本地网络。
+[Interface]
+PrivateKey = $3
+Address = $2/32
+
+[Peer]
+PublicKey = $4
+Endpoint = $(vpn_endpoint_host):$(vpn_listen_port)
+AllowedIPs = $subnet
+PersistentKeepalive = 25
+EOF
+}
+
+vpn_show_conf() { # $1=名字 $2=配置文件路径
+	local conf="$2"
+	echo
+	echo "------------------------------------------------------------"
+	echo " 设备 $1 的客户端配置（同时保存在 ${conf}）"
+	echo "------------------------------------------------------------"
+	cat "$conf"
+	echo "------------------------------------------------------------"
+	if command -v qrencode >/dev/null 2>&1; then
+		echo " 手机 WireGuard App 扫码导入："
+		qrencode -t ansiutf8 -r "$conf"
+	else
+		warn "未装 qrencode，想扫码导入可：apt-get install -y qrencode"
+	fi
+}
+
+cmd_vpn_add() {
+	require_root
+	local name="${1:-}"
+	[[ -n "$name" ]] || die "用法: sudo dsh-vps vpn add <设备名>   例：sudo dsh-vps vpn add macbook"
+	[[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || die "设备名只能用字母、数字、-、_：$name"
+	[[ -d "$VPN_DIR" ]] || die "尚未初始化隧道：sudo dsh-vps vpn setup"
+	[[ -f "$VPN_DIR/peers/$name.env" ]] && die "设备已存在：${name}（先 sudo dsh-vps vpn revoke ${name}）"
+
+	local srv_pub ip priv pub
+	srv_pub=$(tr -d '[:space:]' <"$VPN_DIR/server.pub")
+	ip=$(vpn_next_ip)
+	mkdir -p "$VPN_DIR/peers"
+	chmod 700 "$VPN_DIR" "$VPN_DIR/peers"
+	priv=$(wg genkey)
+	pub=$(printf '%s' "$priv" | wg pubkey)
+
+	printf 'ADDRESS=%s/32\nPUBLIC_KEY=%s\nCREATED_AT=%s\n' \
+		"$ip" "$pub" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$VPN_DIR/peers/$name.env"
+	chmod 600 "$VPN_DIR/peers/$name.env"
+
+	# 名字标记写在 [Peer] 之后：吊销时按「从上一个 [ 到下一个 [ 之前」整段删除，
+	# 标记若在 [Peer] 之前会被算进上一段，删错对象。
+	printf '\n[Peer]\n# dsh-vps peer: %s\nPublicKey = %s\nAllowedIPs = %s/32\n' \
+		"$name" "$pub" "$ip" >>"$WG_CONF"
+	vpn_wg_syncconf
+
+	local conf="$VPN_DIR/peers/$name.conf"
+	vpn_peer_conf "$name" "$ip" "$priv" "$srv_pub" >"$conf"
+	chmod 600 "$conf"
+	vpn_show_conf "$name" "$conf"
+	log "隧道地址 ${ip}（含私钥，$conf 权限 600；丢了就 revoke 后重新签发）"
+}
+
+cmd_vpn_revoke() {
+	require_root
+	local name="${1:-}"
+	[[ -n "$name" ]] || die "用法: sudo dsh-vps vpn revoke <设备名>"
+	[[ -f "$VPN_DIR/peers/$name.env" ]] || die "没有这台设备：$name"
+	vpn_conf_drop_peer "$name"
+	rm -f "$VPN_DIR/peers/$name.env" "$VPN_DIR/peers/$name.conf"
+	vpn_wg_syncconf
+	log "已吊销 ${name}（它的隧道立即失效）"
+}
+
+cmd_vpn_list() {
+	# 中文标题按字节算宽度，用 %-Ns 对齐反而错位，交给制表符
+	printf '  设备\t隧道地址\t最近握手\n'
+	local found=0 handshakes="" f
+	if command -v wg >/dev/null 2>&1; then
+		handshakes=$(wg show "$VPN_IF" latest-handshakes 2>/dev/null || true)
+	fi
+	for f in "$VPN_DIR"/peers/*.env; do
+		[[ -f "$f" ]] || continue
+		found=1
+		local name addr pub hs when="从未"
+		name=$(basename "$f" .env)
+		addr=$(sed -n 's/^ADDRESS=//p' "$f" | head -1)
+		pub=$(sed -n 's/^PUBLIC_KEY=//p' "$f" | head -1)
+		hs=$(printf '%s\n' "$handshakes" | awk -v k="$pub" '$1==k {print $2; exit}')
+		if [[ -n "$hs" && "$hs" != "0" ]]; then
+			when=$(date -d "@$hs" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$hs")
+		fi
+		printf '  %s\t%s\t%s\n' "$name" "$addr" "$when"
+	done
+	[[ $found -eq 1 ]] || echo "  （还没有签发设备：sudo dsh-vps vpn add <名字>）"
+}
+
+cmd_vpn_status() {
+	echo "== 访问策略 =="
+	if [[ "$(vpn_env)" == "on" ]]; then
+		echo "  仅隧道可访问：Caddy 只放行 $(vpn_subnet)，其他来源直接断连"
+	else
+		echo "  公网可访问：任何来源都能打开登录页（凭用户名密码）"
+	fi
+	echo
+	echo "== 隧道接口 =="
+	if [[ -d "/sys/class/net/$VPN_IF" ]]; then
+		echo "  $VPN_IF 已启用（监听 UDP $(vpn_listen_port)）"
+		wg show "$VPN_IF" 2>/dev/null | sed 's/^/  /'
+	else
+		echo "  $VPN_IF 未启用（sudo dsh-vps vpn setup）"
+	fi
+	echo
+	echo "== 已签发设备 =="
+	cmd_vpn_list
+}
+
+cmd_vpn_mode() {
+	local mode="${1:-}"
+	[[ "$mode" == "on" || "$mode" == "off" ]] || die "用法: sudo dsh-vps vpn on|off"
+	require_root
+	if [[ "$mode" == "on" && ! -f "$WG_CONF" ]]; then
+		die "隧道还没建：sudo dsh-vps vpn setup"
+	fi
+	vpn_set_mode "$mode"
+	vpn_apply_site
+	if [[ "$mode" == "on" ]]; then
+		log "已切为「仅隧道可访问」：公网打不开登录页，隧道里的设备照常访问"
+	else
+		log "已切为「公网可访问」：隧道还能继续用，只是不再强制"
+	fi
+}
+
+cmd_vpn_setup() {
+	require_root
+	local name="${1:-device1}"
+	local subnet port addr srv_pub
+	subnet=$(vpn_subnet)
+	port=$VPN_PORT_DEFAULT
+
+	if ! command -v wg >/dev/null 2>&1; then
+		log "安装 WireGuard..."
+		apt-get update -y >/dev/null
+		apt-get install -y wireguard >/dev/null || die "WireGuard 安装失败"
+	fi
+
+	mkdir -p "$VPN_DIR/peers"
+	chmod 700 "$VPN_DIR" "$VPN_DIR/peers"
+
+	# 服务端密钥只生成一次：重跑 setup 不换密钥，已签发的设备不受影响
+	if [[ ! -f "$VPN_DIR/server.key" ]]; then
+		(umask 077 && wg genkey >"$VPN_DIR/server.key")
+		chmod 600 "$VPN_DIR/server.key"
+	fi
+	wg pubkey <"$VPN_DIR/server.key" >"$VPN_DIR/server.pub"
+	srv_pub=$(tr -d '[:space:]' <"$VPN_DIR/server.pub")
+
+	addr="${subnet%.*}.1"
+	if [[ ! -f "$WG_CONF" ]]; then
+		mkdir -p "$WG_DIR"
+		chmod 700 "$WG_DIR"
+		cat >"$WG_CONF" <<EOF
+# dsh-vps 隧道接口：给这台机器上的 DSH 开一条私有通道。
+# 分离隧道——不开 IP 转发、不做 NAT。它不是全流量 VPN，只服务 DSH。
+[Interface]
+Address = $addr/24
+ListenPort = $port
+PrivateKey = $(tr -d '[:space:]' <"$VPN_DIR/server.key")
+SaveConfig = false
+EOF
+		chmod 600 "$WG_CONF"
+	else
+		log "已有 ${WG_CONF}，保留接口与已签发的设备"
+	fi
+
+	systemctl enable --now "wg-quick@$VPN_IF" >/dev/null 2>&1 \
+		|| die "启动 wg-quick@$VPN_IF 失败：journalctl -u wg-quick@$VPN_IF -n 50"
+
+	if command -v ufw >/dev/null 2>&1; then
+		ufw allow "$port"/udp >/dev/null && log "ufw 已放行 $port/udp"
+	fi
+
+	vpn_set_mode on
+	vpn_apply_site
+	log "已切为「仅隧道可访问」：公网访问登录页会直接断连"
+
+	cmd_vpn_add "$name"
+
+	echo
+	echo "============================================================"
+	echo " 隧道已就绪"
+	echo "------------------------------------------------------------"
+	echo " 服务端隧道地址 : ${addr}（网段 ${subnet}）"
+	echo " 监听           : UDP $port"
+	echo "------------------------------------------------------------"
+	echo " 1. 云厂商安全组放行 UDP ${port}（多数连不上都是卡在这一步）"
+	echo " 2. 设备装 WireGuard 官方 App，导入上面这份配置"
+	echo " 3. 连上后访问 https://$(vpn_endpoint_host)"
+	echo "------------------------------------------------------------"
+	echo " 隧道连不上或设备丢了？SSH 登录后：sudo dsh-vps vpn off"
+	echo " （公网立即恢复，隧道配置原样保留，修好再 vpn on）"
+	echo " 临时访问不想装东西：sudo dsh-vps tunnel（SSH 本地转发）"
+	echo "============================================================"
+}
+
+cmd_vpn() {
+	local sub="${1:-status}"
+	shift || true
+	case "$sub" in
+	setup) cmd_vpn_setup "$@" ;;
+	add) cmd_vpn_add "$@" ;;
+	revoke) cmd_vpn_revoke "$@" ;;
+	list) cmd_vpn_list "$@" ;;
+	status) cmd_vpn_status "$@" ;;
+	on) cmd_vpn_mode on ;;
+	off) cmd_vpn_mode off ;;
+	-h | --help) cmd_vpn_help ;;
+	*) cmd_vpn_help; die "未知动作: $sub" ;;
+	esac
+}
+
+cmd_vpn_help() {
+	cat <<'EOF'
+用法: sudo dsh-vps vpn <动作>
+  setup [名字]   安装 WireGuard、建隧道、签发第一台设备，并切到「仅隧道可访问」
+  add <名字>     再签发一台设备（打印配置与二维码）
+  revoke <名字>  吊销设备，立即失效
+  list           列出设备与最近握手时间
+  status         访问策略 + 隧道状态 + 设备
+  on | off       切换「仅隧道可访问」/「公网可访问」
+EOF
+}
+
+cmd_tunnel() {
+	local host
+	host=$(vpn_endpoint_host)
+	cat <<EOF
+零安装方案：SSH 本地端口转发。不装任何东西，效果同样是「只有你能访问 DSH」。
+
+  1. 本机开一个窗口执行（关掉窗口隧道就没了）：
+       ssh -N -L $GATE_PORT:127.0.0.1:$GATE_PORT root@$host
+
+  2. 浏览器打开：
+       http://127.0.0.1:$GATE_PORT
+
+写进 ~/.ssh/config 之后一条命令：
+
+  Host dsh
+    HostName $host
+    User root
+    LocalForward $GATE_PORT 127.0.0.1:$GATE_PORT
+    ServerAliveInterval 30
+
+之后只要：ssh -N dsh
+
+说明：
+  · 只把本机 $GATE_PORT 转发到服务器上同样的端口；断开即失效
+  · 公网那扇门仍然开着（要彻底关上用 sudo dsh-vps vpn setup）
+  · 手机用不了这种方式，要常连就用 WireGuard 隧道
+EOF
+}
+
+## endregion
+
 usage() {
 	cat <<'EOF'
 dsh-vps 管理命令
@@ -466,6 +871,8 @@ dsh-vps 管理命令
   setup-url          打印初始设置链接（含一次性令牌）
   backup              备份数据到 /opt/dsh-vps/backups/（保留 3 份）
   selfcheck           手动触发回归自检探针
+  vpn ...             仅我可访问：WireGuard 隧道（setup/add/revoke/list/status/on/off）
+  tunnel             仅我可访问：SSH 本地端口转发（零安装，打印用法）
 EOF
 }
 
@@ -480,6 +887,8 @@ reset-admin) shift; cmd_reset_admin "$@" ;;
 setup-url) cmd_setup_url ;;
 backup) cmd_backup ;;
 selfcheck) cmd_selfcheck ;;
+vpn) shift; cmd_vpn "$@" ;;
+tunnel) cmd_tunnel ;;
 "" | -h | --help) usage ;;
 *) usage; die "未知子命令: $1" ;;
 esac

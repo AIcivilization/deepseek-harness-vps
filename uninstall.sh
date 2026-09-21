@@ -61,10 +61,11 @@ done
 if [[ $ASSUME_YES -eq 0 ]]; then
 	cat <<EOF
 即将移除 dsh-vps：
-  - 服务        $SERVICE（停止并禁用，删除 $UNIT_FILE）
-  - 安装目录    $INSTALL_ROOT（含 gate 代码、state、备份）
+  - 服务        ${SERVICE}（停止并禁用，删除 ${UNIT_FILE}）
+  - 安装目录    ${INSTALL_ROOT}（含 gate 代码、state、备份）
   - 命令        /usr/local/bin/dsh-vps
   - Caddy 站点  $CADDY_SITE_FILE${PURGE_CADDY:+（并移除 caddy 软件包）}
+  - 隧道        /etc/wireguard/wg0.conf（dsh-vps vpn 建过才有）
   - DSH 数据    $DSH_HOME_DIR$([ $KEEP_DATA -eq 1 ] && echo "（--keep-data：保留）" || echo "（删除）")
   - 系统用户    $DSH_USER$([ $KEEP_DATA -eq 1 ] && echo "（--keep-data：保留）" || echo "（保留，重装可复用）")
 
@@ -78,7 +79,7 @@ fi
 
 ## region: 步骤 2：备份
 
-log "步骤 1/5：备份"
+log "步骤 1/6：备份"
 mkdir -p /root
 local_ts="dsh-vps-uninstall-$(date +%Y%m%d-%H%M%S).tar.gz"
 BACKUP="/root/$local_ts"
@@ -100,7 +101,7 @@ fi
 
 ## region: 步骤 3：停服务、移除 unit
 
-log "步骤 2/5：停止并移除 $SERVICE"
+log "步骤 2/6：停止并移除 $SERVICE"
 systemctl stop "$SERVICE" 2>/dev/null || true
 systemctl disable "$SERVICE" 2>/dev/null || true
 rm -f "$UNIT_FILE"
@@ -115,7 +116,7 @@ pkill -u "$DSH_USER" -f "gate/server.js" 2>/dev/null || true
 
 ## region: 步骤 4：删文件
 
-log "步骤 3/5：移除安装目录与命令"
+log "步骤 3/6：移除安装目录与命令"
 rm -rf "$INSTALL_ROOT"
 rm -f /usr/local/bin/dsh-vps
 
@@ -123,7 +124,7 @@ rm -f /usr/local/bin/dsh-vps
 
 ## region: 步骤 5：Caddy
 
-log "步骤 4/5：移除 Caddy 站点块"
+log "步骤 4/6：移除 Caddy 站点块"
 if [[ -f "$CADDY_SITE_FILE" ]]; then
 	rm -f "$CADDY_SITE_FILE"
 fi
@@ -145,11 +146,25 @@ fi
 
 ## endregion
 
+## region: 步骤 5：隧道
+
+log "步骤 5/6：移除隧道"
+if [[ -f /etc/wireguard/wg0.conf ]]; then
+	systemctl stop wg-quick@wg0 2>/dev/null || true
+	systemctl disable wg-quick@wg0 2>/dev/null || true
+	rm -f /etc/wireguard/wg0.conf
+	log "已移除 wg0（设备里的客户端配置请自行删掉）"
+else
+	log "没有隧道，跳过"
+fi
+
+## endregion
+
 ## region: 步骤 6：DSH 数据
 
-log "步骤 5/5：处理 DSH 数据目录"
+log "步骤 6/6：处理 DSH 数据目录"
 if [[ $KEEP_DATA -eq 1 ]]; then
-	log "保留 $DSH_HOME_DIR（--keep-data）"
+	log "保留 ${DSH_HOME_DIR}（--keep-data）"
 else
 	rm -rf "$DSH_HOME_DIR"
 	log "已删除 $DSH_HOME_DIR"

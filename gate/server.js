@@ -21,6 +21,8 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+// 站点块模板与 gate 同源管理：install.sh、bin/dsh-vps 也调用它，只此一份
+const { caddySiteBlock, readVpnEnv } = require("./site-block.js");
 
 //#region 配置
 
@@ -1178,21 +1180,14 @@ function persistTrustedHost(domain) {
  * 更新运行期 trustedHost 并持久化 → 重启 DSH 子进程（自动重新捕获 token + 兑换）。
  * 站点文件由 install.sh 预创建并属主 dsh（组 caddy 可读），gate 无需 root。
  */
-// 站点块模板：install.sh 写初始块、gate 改域名时重写，两边必须是同一份。
-// header_up X-Forwarded-For {remote_host} 显式覆盖客户端可能伪造的 XFF —— gate 的
-// 登录限流与审计日志都读这个头，能被伪造就等于把限流关掉。
-function caddySiteBlock(host) {
-	return (
-		`${host} {\n` +
-		`\treverse_proxy 127.0.0.1:${GATE_PORT} {\n` +
-		`\t\theader_up X-Forwarded-For {remote_host}\n` +
-		`\t}\n` +
-		`}\n`
-	);
+// 站点块模板在 gate/site-block.js（install.sh 与 dsh-vps vpn 共用）。
+// 改域名时必须带上当前隧道策略，否则「仅隧道可访问」会被改域名动作悄悄抹掉。
+function siteBlock(host) {
+	return caddySiteBlock(host, { gatePort: GATE_PORT, vpn: readVpnEnv(STATE_DIR) });
 }
 
 async function applyDomainChange(domain) {
-	fs.writeFileSync(CADDY_SITE_FILE, caddySiteBlock(domain));
+	fs.writeFileSync(CADDY_SITE_FILE, siteBlock(domain));
 	try {
 		await caddyReload();
 		log(`caddy reloaded with site ${domain}`);

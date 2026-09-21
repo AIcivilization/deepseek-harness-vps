@@ -73,7 +73,7 @@ fetch_file() { # $1=仓库内相对路径 $2=目标路径
 }
 
 export DEBIAN_FRONTEND=noninteractive
-trap 'warn "安装失败（行 $LINENO），可用 journalctl -u dsh-gate -n 50 排查服务问题"' ERR
+trap 'warn "安装失败（行 ${LINENO}），可用 journalctl -u dsh-gate -n 50 排查服务问题"' ERR
 
 ## endregion
 
@@ -117,7 +117,7 @@ step1_prechecks() {
 			fi
 		done
 	else
-		log "检测到已有安装（$INSTALL_ROOT），进入修复/更新模式（保留 state/）"
+		log "检测到已有安装（${INSTALL_ROOT}），进入修复/更新模式（保留 state/）"
 	fi
 }
 
@@ -137,7 +137,7 @@ install_node_cn() {
 	list=$(curl -fsSL --max-time 30 "https://registry.npmmirror.com/-/binary/node/latest-v22.x/")
 	pkg=$(printf '%s' "$list" | grep -o 'node-v22[0-9.]*-linux-x64\.tar\.xz' | sort -Vu | tail -1)
 	[[ -n "$pkg" ]] || die "无法从 npmmirror 获取 Node 22 版本号"
-	log "下载 Node.js: $pkg（npmmirror）"
+	log "下载 Node.js: ${pkg}（npmmirror）"
 	curl -fsSL --retry 2 -o "/tmp/$pkg" "https://registry.npmmirror.com/-/binary/node/latest-v22.x/$pkg"
 	(cd /tmp && curl -fsSL "https://registry.npmmirror.com/-/binary/node/latest-v22.x/SHASUMS256.txt" \
 		| grep "${pkg}\$" | sha256sum -c - >/dev/null) || die "Node 包 sha256 校验失败"
@@ -178,7 +178,7 @@ step2_node() {
 ## region: 步骤 3：DSH 版本化安装
 
 step3_dsh() {
-	log "步骤 3/9：DeepSeek Harness $DSH_VERSION（版本化安装）"
+	log "步骤 3/9：DeepSeek Harness ${DSH_VERSION}（版本化安装）"
 	local prefix="$INSTALL_ROOT/dsh/$DSH_VERSION"
 	local bin="$prefix/node_modules/@deepseek-ai/dsh/lib/bin.js"
 	if [[ -f "$bin" ]]; then
@@ -238,6 +238,8 @@ step5_gate() {
 	mkdir -p "$INSTALL_ROOT/gate" "$INSTALL_ROOT/bin"
 	fetch_file gate/server.js "$INSTALL_ROOT/gate/server.js"
 	node --check "$INSTALL_ROOT/gate/server.js" || die "gate/server.js 语法检查失败"
+	fetch_file gate/site-block.js "$INSTALL_ROOT/gate/site-block.js"
+	node --check "$INSTALL_ROOT/gate/site-block.js" || die "gate/site-block.js 语法检查失败"
 	fetch_file bin/dsh-vps "$INSTALL_ROOT/bin/dsh-vps"
 	chmod 755 "$INSTALL_ROOT/bin/dsh-vps"
 	bash -n "$INSTALL_ROOT/bin/dsh-vps" || die "bin/dsh-vps 语法检查失败"
@@ -275,22 +277,18 @@ step6_caddy() {
 
 	# 站点块：有域名写域名块（自动 HTTPS），无则 :443 内部自签过渡
 	# 属主 dsh（向导重写）、组 caddy（Caddy 读取）、640
+	# 站点块由 gate/site-block.js 生成：install.sh 写初始块、gate 改域名、dsh-vps vpn
+	# 切换访问策略，三处共用同一份模板。重装时若 state/vpn.env 还开着隧道模式，
+	# 这里会直接沿用「仅隧道可访问」，不会把已经关上的门重新敞开。
 	local site="${DOMAIN:-:443}"
-	cat >/etc/caddy/dsh-site.conf <<EOF
-${site} {
-	reverse_proxy 127.0.0.1:$GATE_PORT {
-		# 只信 Caddy 自己看到的对端地址：显式覆盖，客户端伪造的 X-Forwarded-For 一律作废。
-		# gate 的登录限流与审计日志都读这个头，让它可被伪造等于把限流关掉。
-		header_up X-Forwarded-For {remote_host}
-	}
-}
-EOF
+	node "$INSTALL_ROOT/gate/site-block.js" "$site" "$INSTALL_ROOT" "$GATE_PORT" \
+		>/etc/caddy/dsh-site.conf || die "生成站点块失败"
 	chown "$DSH_USER":caddy /etc/caddy/dsh-site.conf
 	chmod 640 /etc/caddy/dsh-site.conf
 
 	systemctl enable --now caddy >/dev/null 2>&1 || true
 	systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy
-	log "Caddyfile 已生效（站点：$site）"
+	log "Caddyfile 已生效（站点：${site}）"
 }
 
 ## endregion
@@ -364,7 +362,7 @@ EOF
 	systemctl daemon-reload
 	systemctl enable dsh-gate >/dev/null 2>&1
 	systemctl restart dsh-gate
-	log "dsh-gate.service 已启动（DSH_TRUSTED_HOST=$trusted）"
+	log "dsh-gate.service 已启动（DSH_TRUSTED_HOST=${trusted}）"
 }
 
 ## endregion
@@ -436,7 +434,7 @@ step9_verify() {
 	echo "============================================================"
 	echo " dsh-vps 安装完成"
 	echo "------------------------------------------------------------"
-	echo " DSH 版本  : $DSH_VERSION（钉住）"
+	echo " DSH 版本  : ${DSH_VERSION}（钉住）"
 	echo " 访问地址  : $open_url"
 	if [[ -n "$SETUP_TOKEN" ]]; then
 		echo "             （初始设置需要上面的一次性令牌，别用不带令牌的地址）"
@@ -445,11 +443,13 @@ step9_verify() {
 	fi
 	echo " 服务/日志 : systemctl status dsh-gate | journalctl -u dsh-gate -f"
 	echo " 管理命令  : dsh-vps status | restart | upgrade | rollback | reset-admin | setup-url | backup"
+	echo " 仅我可访问: dsh-vps vpn setup（隧道）| dsh-vps tunnel（SSH 转发，零安装）"
 	echo "------------------------------------------------------------"
 	echo " 下一步："
 	echo " 1. 若使用域名，请先将 A 记录解析到本机（Caddy 会自动签发证书）"
 	echo " 2. 浏览器打开上面的访问地址，进入初始设置向导"
 	echo " 3. 填写管理员用户名/密码（+ 可选域名、DeepSeek API Key）→ 登录"
+	echo " 4. 可选：sudo dsh-vps vpn setup —— 之后公网访问不到登录页，只有隧道内的设备能进"
 	if [[ -n "$SETUP_TOKEN" ]]; then
 		echo
 		echo " 令牌只此一份，链接丢了随时重取：sudo dsh-vps setup-url"

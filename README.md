@@ -49,6 +49,7 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | 安全升级 | DSH 版本钉在已验证清单内，升级走备份 → 自检 → 失败自动回滚，也可随时手动回滚 |
 | 可观测与可恢复 | 本机 `/gate/health` 直接给出崩溃原因与连续崩溃次数；`dsh-vps backup` 保留最近 3 份 |
 | 收紧的暴露面 | 会话 Cookie 恒为 Secure/HttpOnly/SameSite；诊断接口只对服务器本机与已登录会话开放；服务以无特权的 dsh 用户运行并受 systemd 沙箱约束 |
+| 仅我可访问 | 一条命令建 WireGuard 隧道，之后公网访问不到登录页，只有隧道内的设备能进；不想装东西也可用 SSH 本地转发 |
 
 ---
 
@@ -102,6 +103,36 @@ API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置
 
 ---
 
+## 仅我可访问（可选）
+
+默认公网可达，靠登录页挡人。想让公网连登录页都摸不到，一条命令建隧道：
+
+```bash
+sudo dsh-vps vpn setup macbook
+```
+
+它装上 WireGuard、建好隧道并签发第一台设备的客户端配置（终端直接打印，手机用 `qrencode -t ansiutf8 < 配置` 转二维码扫）。开启后 Caddy 只放行隧道网段，其他来源直接断连，扫描器连握手都拿不到。域名与证书照旧，续期不受影响。
+
+```bash
+sudo dsh-vps vpn add iphone     # 再加一台设备
+sudo dsh-vps vpn list           # 已签发设备 + 最近握手时间
+sudo dsh-vps vpn revoke iphone  # 设备丢了就吊销，立即失效
+sudo dsh-vps vpn status         # 访问策略 + 隧道状态 + 设备
+sudo dsh-vps vpn off            # 公网立刻恢复，隧道配置留着，修好再 on
+```
+
+隧道是**分离模式**：只有访问这台 DSH 走隧道，其余流量照常走本地网络 —— 不开 IP 转发、不做 NAT，它不是全流量 VPN。SSH 始终是最外层兜底，隧道挂了也能登上去 `vpn off`。
+
+只在电脑上用的话，连 WireGuard 都不用装，SSH 本地转发等效：
+
+```bash
+sudo dsh-vps tunnel            # 打印现成的 ssh -L 命令与 ~/.ssh/config 片段
+```
+
+浏览器把 `127.0.0.1` 视为安全来源，登录态正常生效。缺点是断开即失效、手机用不了；要常连或在手机上用就选隧道。
+
+---
+
 ## 管理命令
 
 ```bash
@@ -115,7 +146,13 @@ sudo dsh-vps rollback      # 切回上一 DSH 版本
 sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置（重新走向导并换发令牌）
 sudo dsh-vps setup-url     # 重新打印带一次性令牌的初始设置链接
 sudo dsh-vps backup        # 备份数据（保留最近 3 份）
+sudo dsh-vps vpn setup macbook  # 建 WireGuard 隧道并切到「仅隧道可访问」
+sudo dsh-vps vpn add iphone     # 再签发一台设备（打印配置 + 二维码）
+sudo dsh-vps vpn list|revoke|status|on|off
+sudo dsh-vps tunnel        # 零安装备选：SSH 本地端口转发用法
 ```
+
+Caddy 站点块由 `gate/site-block.js` 统一生成，安装、改域名、隧道开关三处共用同一份模板。
 
 ---
 
@@ -142,6 +179,7 @@ DSH 与网关均只绑 127.0.0.1，用户浏览器接触不到 DSH 的会话 Coo
 | `uninstall.sh` | 卸载并备份 |
 | `bin/dsh-vps` | 运维命令行 |
 | `gate/server.js` | 登录网关（Node 原生，零依赖） |
+| `gate/site-block.js` | Caddy 站点块模板（安装 / 改域名 / 隧道开关共用） |
 | `caddy/Caddyfile.template` | Caddy 主配置 |
 | `units/dsh-gate.service` | systemd 单元模板 |
 | `versions.json` | DSH 已验证版本清单 |
