@@ -55,6 +55,10 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 ## 截图
 
+<p align="center">
+  <img src="docs/demo.gif" alt="全流程演示：安装 → 设置向导 → 登录 → DSH 界面 → 插件市场" width="830">
+</p>
+
 | 安装完成 | 初始设置向导 | 向导已填写 |
 | :---: | :---: | :---: |
 | ![](docs/screenshots/01-install.png) | ![](docs/screenshots/02-setup.png) | ![](docs/screenshots/03-setup-filled.png) |
