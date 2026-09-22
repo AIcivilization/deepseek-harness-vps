@@ -51,7 +51,7 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 ## Screenshots
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Full walkthrough: install → setup wizard → login → DSH UI → plugin marketplace" width="830">
+  <img src="docs/demo.gif" alt="Full walkthrough: install → setup wizard → login → DSH UI → plugin marketplace" width="1000">
 </p>
 
 <details>
