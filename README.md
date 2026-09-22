@@ -53,6 +53,22 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 ---
 
+## 截图
+
+| 安装完成 | 初始设置向导 | 向导已填写 |
+| :---: | :---: | :---: |
+| ![](docs/screenshots/01-install.png) | ![](docs/screenshots/02-setup.png) | ![](docs/screenshots/03-setup-filled.png) |
+
+| 设置完成 | 登录门 | 登录 |
+| :---: | :---: | :---: |
+| ![](docs/screenshots/04-setup-done.png) | ![](docs/screenshots/05-login.png) | ![](docs/screenshots/06-login-filled.png) |
+
+| DSH 原生界面 | 设置（公网域名下可用） | 插件市场 |
+| :---: | :---: | :---: |
+| ![](docs/screenshots/07-dsh.png) | ![](docs/screenshots/08-settings.png) | ![](docs/screenshots/09-market.png) |
+
+---
+
 ## 环境要求
 
 - Ubuntu 22.04+ / Debian 12+（root）

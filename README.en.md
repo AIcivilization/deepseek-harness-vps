@@ -48,6 +48,22 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 ---
 
+## Screenshots
+
+| Install done | Setup wizard | Wizard filled |
+| :---: | :---: | :---: |
+| ![](docs/screenshots/01-install.png) | ![](docs/screenshots/02-setup.png) | ![](docs/screenshots/03-setup-filled.png) |
+
+| Setup complete | Login gate | Logging in |
+| :---: | :---: | :---: |
+| ![](docs/screenshots/04-setup-done.png) | ![](docs/screenshots/05-login.png) | ![](docs/screenshots/06-login-filled.png) |
+
+| Native DSH UI | Settings (works on a public domain) | Plugin marketplace |
+| :---: | :---: | :---: |
+| ![](docs/screenshots/07-dsh.png) | ![](docs/screenshots/08-settings.png) | ![](docs/screenshots/09-market.png) |
+
+---
+
 ## Requirements
 
 - Ubuntu 22.04+ / Debian 12+ (root)
