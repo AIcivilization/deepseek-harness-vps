@@ -25,6 +25,11 @@ DSH_HOME_DIR="${DSH_HOME:-/home/dsh/.dsh}"
 SERVICE="dsh-gate"
 RAW_BASE="${DSHVPS_RAW_BASE:-https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main}"
 VERSIONS_URL="${DSHVPS_VERSIONS_URL:-$RAW_BASE/versions.json}"
+# 依赖解析冻结时间点的兜底值（版本表里带 resolve_before 时以版本表为准）。
+# 只钉顶层包版本不够：DSH 子包依赖是 ^x 浮动范围，上游发新预发布波次时解析结果会整体漂上去
+# ——2026-09-22 上游漏发 rc.3 的 dsh-client-ui-sidebar-documentpreview 就导致过 ETARGET。
+# 升级 latest_verified 时必须同步推后这个值。
+DEFAULT_RESOLVE_BEFORE="${DSHVPS_RESOLVE_BEFORE:-2026-09-22T05:00:00Z}"
 VERSIONS_CACHE="$ROOT/state/versions.cache.json"
 NPM_REGISTRY="${DSHVPS_NPM_REGISTRY:-}"
 
@@ -201,13 +206,15 @@ cmd_upgrade() {
 	local cur
 	cur=$(current_version)
 	log "当前版本: $cur"
+	# --latest 明确要最新，不冻结解析；其余情况冻结在验证过的时间点之前
+	local resolve_before="$DEFAULT_RESOLVE_BEFORE"
 
 	if [[ $latest_mode -eq 1 ]]; then
 		warn "--latest：将安装 npm 上未经 dsh-vps 验证的最新版本，可能破坏兼容性（有备份与自动回滚兜底）"
 		[[ $assume_yes -eq 1 ]] || { read -rp "确认继续？[y/N] " ans; [[ "$ans" == "y" || "$ans" == "Y" ]] || die "已取消"; }
-		local reg_arg=()
-		[[ -n "$NPM_REGISTRY" ]] && reg_arg=(--registry="$NPM_REGISTRY")
-		target=$(npm view @deepseek-ai/dsh version "${reg_arg[@]}" 2>/dev/null) || die "无法查询 npm 最新版本"
+		local reg_arg=(version)
+		[[ -n "$NPM_REGISTRY" ]] && reg_arg+=(--registry="$NPM_REGISTRY")
+		target=$(npm view @deepseek-ai/dsh "${reg_arg[@]}" 2>/dev/null) || die "无法查询 npm 最新版本"
 	elif [[ -z "$target" ]]; then
 		# 默认：已验证版本表的 latest_verified
 		local versions
@@ -215,6 +222,9 @@ cmd_upgrade() {
 			|| die "无法获取版本表（${VERSIONS_URL}）。可显式指定版本：dsh-vps upgrade <version>"
 		target=$(printf '%s' "$versions" | sed -n 's/.*"latest_verified": *"\([^"]*\)".*/\1/p' | head -1)
 		[[ -n "$target" ]] || die "版本表中没有 latest_verified 字段"
+		local rb
+		rb=$(printf '%s' "$versions" | sed -n 's/.*"resolve_before": *"\([^"]*\)".*/\1/p' | head -1)
+		[[ -n "$rb" ]] && resolve_before="$rb"
 		# min_gate 提示（gate 无版本戳，仅提醒人工确认）
 		if printf '%s' "$versions" | grep -q "\"dsh\": *\"$target\""; then
 			local min_gate
@@ -233,11 +243,23 @@ cmd_upgrade() {
 	local prefix="$ROOT/dsh/$target"
 	if [[ ! -f "$prefix/node_modules/@deepseek-ai/dsh/lib/bin.js" ]]; then
 		mkdir -p "$prefix"
-		local reg_arg=()
-		[[ -n "$NPM_REGISTRY" ]] && reg_arg=(--registry="$NPM_REGISTRY")
-		npm install --prefix "$prefix" "${reg_arg[@]}" \
-			--no-audit --no-fund --loglevel=error "@deepseek-ai/dsh@$target" \
-			|| die "npm 安装 $target 失败"
+		# 数组恒不为空：bash 3.2 在 set -u 下展开空数组会报 unbound variable
+		local args=(--no-audit --no-fund --loglevel=error)
+		[[ -n "$NPM_REGISTRY" ]] && args+=(--registry="$NPM_REGISTRY")
+		local frozen=1
+		[[ $latest_mode -eq 1 || "$resolve_before" == "none" ]] && frozen=0
+		[[ $frozen -eq 1 ]] && args+=(--before="$resolve_before")
+		if ! npm install --prefix "$prefix" "${args[@]}" "@deepseek-ai/dsh@$target"; then
+			if [[ $frozen -eq 1 ]]; then
+				warn "按时间点冻结解析失败，改为不冻结重试（可能装到未验证的新版本）"
+				local args2=(--no-audit --no-fund --loglevel=error)
+				[[ -n "$NPM_REGISTRY" ]] && args2+=(--registry="$NPM_REGISTRY")
+				npm install --prefix "$prefix" "${args2[@]}" "@deepseek-ai/dsh@$target" \
+					|| die "npm 安装 $target 失败"
+			else
+				die "npm 安装 $target 失败"
+			fi
+		fi
 		[[ -f "$prefix/node_modules/@deepseek-ai/dsh/lib/bin.js" ]] || die "安装产物缺失: $prefix"
 	fi
 

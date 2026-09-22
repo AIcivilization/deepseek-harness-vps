@@ -17,6 +17,12 @@ set -euo pipefail
 ## region: 常量与参数
 
 DSH_VERSION="0.1.5-rc.2" # 钉住版本（设计文档 §10 已验证版本表，勿随意改）
+# 只钉顶层包版本是不够的：DSH 各子包的依赖是 ^0.1.5-rc.2 这类浮动范围，上游一发新的
+# 预发布波次，解析结果就整体漂上去。2026-09-22 上游发了 0.1.5-rc.3 波次，但漏发了
+# dsh-client-ui-sidebar-documentpreview，于是 ETARGET 装不上。用 --before 把解析冻结在
+# 验证通过的那个时间点之前，装到的就是验证过的那棵树。升级 DSH_VERSION 时同步推后这个值。
+# 设为 none 可关闭冻结。
+DSH_RESOLVE_BEFORE="${DSH_RESOLVE_BEFORE:-2026-09-22T05:00:00Z}"
 INSTALL_ROOT="/opt/dsh-vps"
 DSH_USER="dsh"
 DSH_HOME_DIR="/home/dsh/.dsh"
@@ -185,12 +191,21 @@ step3_dsh() {
 		log "DSH $DSH_VERSION 已安装，跳过"
 	else
 		mkdir -p "$prefix"
-		if [[ "$MIRROR" == "cn" ]]; then
-			npm install --prefix "$prefix" --registry=https://registry.npmmirror.com \
-				--no-audit --no-fund --loglevel=error "@deepseek-ai/dsh@$DSH_VERSION"
-		else
-			npm install --prefix "$prefix" \
-				--no-audit --no-fund --loglevel=error "@deepseek-ai/dsh@$DSH_VERSION"
+		# 数组恒不为空：bash 3.2 在 set -u 下展开空数组会报 unbound variable
+		local args=(--no-audit --no-fund --loglevel=error)
+		[[ "$MIRROR" == "cn" ]] && args+=(--registry=https://registry.npmmirror.com)
+		local frozen=1
+		[[ "$DSH_RESOLVE_BEFORE" == "none" ]] && frozen=0
+		[[ $frozen -eq 1 ]] && args+=(--before="$DSH_RESOLVE_BEFORE")
+		if ! npm install --prefix "$prefix" "${args[@]}" "@deepseek-ai/dsh@$DSH_VERSION"; then
+			# 冻结解析本身失败（例如镜像源不带发布时间戳）时退化为不冻结，
+			# 宁可装到未验证的新预发布版，也别让安装卡死在这一步。
+			if [[ $frozen -eq 1 ]]; then
+				warn "按时间点冻结解析失败，改为不冻结重试（可能装到未验证的新版本）"
+				local args2=(--no-audit --no-fund --loglevel=error)
+				[[ "$MIRROR" == "cn" ]] && args2+=(--registry=https://registry.npmmirror.com)
+				npm install --prefix "$prefix" "${args2[@]}" "@deepseek-ai/dsh@$DSH_VERSION"
+			fi
 		fi
 		[[ -f "$bin" ]] || die "DSH 安装产物缺失: $bin"
 	fi
