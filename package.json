@@ -1,0 +1,48 @@
+{
+  "name": "dsh-vps",
+  "version": "1.4.0",
+  "description": "Ship DeepSeek Harness to your own VPS: one command installs a zero-dependency login gateway, automatic HTTPS through Caddy, systemd supervision, and optional WireGuard-only access.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "dsh-vps",
+    "vps",
+    "installer",
+    "self-hosted",
+    "caddy",
+    "wireguard",
+    "https",
+    "gateway"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/AIcivilization/deepseek-harness-vps#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AIcivilization/deepseek-harness-vps.git"
+  },
+  "bugs": "https://github.com/AIcivilization/deepseek-harness-vps/issues",
+  "bin": {
+    "dsh-vps-install": "scripts/bootstrap.mjs"
+  },
+  "files": [
+    "install.sh",
+    "uninstall.sh",
+    "bin/dsh-vps",
+    "gate/server.js",
+    "gate/site-block.js",
+    "units/dsh-gate.service",
+    "caddy/Caddyfile.template",
+    "versions.json",
+    "scripts/bootstrap.mjs",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

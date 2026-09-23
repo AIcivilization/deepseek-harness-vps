@@ -7,6 +7,7 @@
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/deepseek-harness-vps" alt="MIT 许可证"></a>
+  <a href="https://www.npmjs.com/package/dsh-vps"><img src="https://img.shields.io/npm/v/dsh-vps" alt="npm 版本"></a>
   <img src="https://img.shields.io/badge/platform-Ubuntu%2022.04%2B%20%2F%20Debian%2012%2B-blue" alt="平台：Ubuntu 22.04+ / Debian 12+">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.2-4176E6" alt="DeepSeek Harness 0.1.5-rc.2">
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="运行时依赖：0">
@@ -100,6 +101,12 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com --mirror cn
+```
+
+走 npm 也行，装的是这个包自带的同一份脚本（版本固定，不联网拉取）：
+
+```bash
+npx dsh-vps-install install --domain dsh.example.com
 ```
 
 ## 卸载

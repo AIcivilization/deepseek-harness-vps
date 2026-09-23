@@ -6,6 +6,7 @@
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/deepseek-harness-vps" alt="MIT license"></a>
+  <a href="https://www.npmjs.com/package/dsh-vps"><img src="https://img.shields.io/npm/v/dsh-vps" alt="npm version"></a>
   <img src="https://img.shields.io/badge/platform-Ubuntu%2022.04%2B%20%2F%20Debian%2012%2B-blue" alt="Platform: Ubuntu 22.04+ / Debian 12+">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.2-4176E6" alt="DeepSeek Harness 0.1.5-rc.2">
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="Runtime dependencies: 0">
@@ -91,6 +92,12 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 ```
 
 Add `--mirror cn` if you're behind the GFW (Node and DSH come from npmmirror).
+
+Or install through npm, running exactly the scripts shipped in this package (pinned, no network fetch):
+
+```bash
+npx dsh-vps-install install --domain dsh.example.com
+```
 
 ## Uninstall
 

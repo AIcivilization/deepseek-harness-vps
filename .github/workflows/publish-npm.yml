@@ -1,0 +1,41 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      # 目录站校验的前提是：仓库里的 package.json 版本 === npm 上已发布的精确版本。
+      # tag 必须与 package.json 一致，否则宁可不发，也不要留下对不上的版本号。
+      - name: 校验 tag 与 package.json 版本一致
+        run: |
+          pkg_version=$(node -p "require('./package.json').version")
+          tag_version="${GITHUB_REF_NAME#v}"
+          if [[ "$pkg_version" != "$tag_version" ]]; then
+            echo "tag $GITHUB_REF_NAME 与 package.json 版本 $pkg_version 不一致，拒绝发布" >&2
+            exit 1
+          fi
+          echo "发布 dsh-vps@$pkg_version"
+
+      - name: 检查打包内容
+        run: npm pack --dry-run
+
+      - name: 发布
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
