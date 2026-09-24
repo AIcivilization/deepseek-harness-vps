@@ -1,6 +1,6 @@
 {
   "name": "dsh-vps",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Ship DeepSeek Harness to your own VPS: one command installs a zero-dependency login gateway, automatic HTTPS through Caddy, systemd supervision, and optional WireGuard-only access.",
   "keywords": [
     "deepseek-harness",

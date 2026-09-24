@@ -17,7 +17,10 @@
 #   install-units       安装浏览器一键升级所需的 systemd 单元（install.sh / update-gate 调用）
 #   upgrade-run         执行浏览器发起的升级请求（由 dsh-vps-upgrade.service 以 root 调用）
 
-set -euo pipefail
+set -Eeuo pipefail
+# set -e 会让脚本在任何一条命令失败时静默退出；这里把"在哪一行、哪条命令"打出来，
+# 升级日志（state/upgrade.log）里就能直接看到原因，而不是戛然而止。
+trap 'printf "\033[1;31m[dsh-vps]\033[0m 意外退出：第 %s 行 \`%s\` 返回 %s\n" "$LINENO" "$BASH_COMMAND" "$?" >&2' ERR
 
 ROOT="${DSHVPS_ROOT:-/opt/dsh-vps}"
 GATE_PORT="${GATE_PORT:-3100}"
@@ -54,14 +57,25 @@ cmd_backup() {
 	require_root
 	mkdir -p "$ROOT/backups"
 	local ts="$ROOT/backups/dsh-vps-$(date +%Y%m%d-%H%M%S).tar.gz"
-	tar -czf "$ts" -C / "${DSH_HOME_DIR#/}" "${ROOT#/}/state" 2>/dev/null \
-		|| die "备份失败"
+	# DSH 运行中仍在写文件：GNU tar 遇到"读取期间文件有变化"返回 1，归档本身完整，只告警；
+	# 返回 2 才是真失败
+	local rc=0
+	tar -czf "$ts" -C / "${DSH_HOME_DIR#/}" "${ROOT#/}/state" 2>/dev/null || rc=$?
+	if [[ $rc -eq 1 ]]; then
+		warn "部分文件在备份期间有变动（DSH 运行中属正常），备份仍可用"
+	elif [[ $rc -ne 0 ]]; then
+		die "备份失败（tar 返回 $rc）"
+	fi
 	chmod 600 "$ts"
 	log "备份完成: $ts"
-	# 保留最近 3 份
+	# 保留最近 3 份。写成 if：`[[ ]] && ...` 作为函数最后一行时，条件不成立会让函数返回 1，
+	# 调用方在 set -e 下直接静默退出——首次升级（备份不足 4 份）就曾因此在备份后中止
 	local old
-	old=$(ls -1t "$ROOT"/backups/dsh-vps-*.tar.gz 2>/dev/null | tail -n +4)
-	[[ -n "$old" ]] && rm -f $old && log "已清理旧备份"
+	old=$(ls -1t "$ROOT"/backups/dsh-vps-*.tar.gz 2>/dev/null | tail -n +4 || true)
+	if [[ -n "$old" ]]; then
+		rm -f $old
+		log "已清理旧备份"
+	fi
 }
 
 ## endregion
@@ -328,7 +342,7 @@ console.log(c.sort(cmp).pop());
 
 	# 5. 清理：保留最近 2 个版本目录
 	local old_dirs
-	old_dirs=$(ls -1d "$ROOT"/dsh/*/ 2>/dev/null | grep -v current | sed 's|/$||' | sort -V | head -n -2)
+	old_dirs=$(ls -1d "$ROOT"/dsh/*/ 2>/dev/null | grep -v current | sed 's|/$||' | sort -V | head -n -2 || true)
 	for d in $old_dirs; do
 		[[ "$(basename "$d")" == "$cur" ]] && continue # 保底：至少留一个可回滚目标
 		rm -rf "$d" && log "已清理旧版本目录: $d"
@@ -341,7 +355,7 @@ cmd_rollback() {
 	cur=$(current_version)
 	local prev
 	prev=$(ls -1d "$ROOT"/dsh/*/ 2>/dev/null | grep -v current | sed 's|/$||' | xargs -n1 basename 2>/dev/null \
-		| grep -vx "$cur" | sort -V | tail -1)
+		| grep -vx "$cur" | sort -V | tail -1 || true)
 	[[ -n "$prev" ]] || die "没有可回滚的版本目录"
 	log "回滚: $cur -> $prev"
 	switch_version "$prev"
@@ -998,6 +1012,7 @@ cmd_upgrade_run() {
 	chmod 600 "$UPGRADE_LOG"
 	# 独立进程执行：写在 `|| rc=$?` 里的函数/子 shell 会让 set -e 失效，出错也不停
 	"$ROOT/bin/dsh-vps" upgrade --latest --yes >>"$UPGRADE_LOG" 2>&1 || rc=$?
+	[[ $rc -eq 0 ]] || printf '[dsh-vps] 升级进程退出码 %s（原因见上一行）\n' "$rc" >>"$UPGRADE_LOG"
 	to=$(current_version)
 	if [[ $rc -eq 0 ]]; then
 		write_upgrade_status success "$from" "$to"
