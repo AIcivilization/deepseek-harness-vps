@@ -290,12 +290,12 @@ step6_caddy() {
 	fi
 	install -m 644 /tmp/Caddyfile.dshvps /etc/caddy/Caddyfile
 
-	# 站点块：有域名写域名块（自动 HTTPS），无则 :443 内部自签过渡
+	# 站点块：有域名写域名块（自动 HTTPS），无则按公网 IP 写站点、Caddy 内置 CA 自签过渡
 	# 属主 dsh（向导重写）、组 caddy（Caddy 读取）、640
 	# 站点块由 gate/site-block.js 生成：install.sh 写初始块、gate 改域名、dsh-vps vpn
 	# 切换访问策略，三处共用同一份模板。重装时若 state/vpn.env 还开着隧道模式，
 	# 这里会直接沿用「仅隧道可访问」，不会把已经关上的门重新敞开。
-	local site="${DOMAIN:-:443}"
+	local site="$TRUSTED_HOST"
 	node "$INSTALL_ROOT/gate/site-block.js" "$site" "$INSTALL_ROOT" "$GATE_PORT" \
 		>/etc/caddy/dsh-site.conf || die "生成站点块失败"
 	chown "$DSH_USER":caddy /etc/caddy/dsh-site.conf
@@ -324,23 +324,33 @@ detect_public_ip() {
 	printf '%s' "$ip"
 }
 
-step7_systemd() {
-	log "步骤 7/9：systemd 服务"
-	mkdir -p "$INSTALL_ROOT/state" "$INSTALL_ROOT/backups"
-
-	# --trusted-host 取值：域名优先；重装且未传 --domain 时保留已有配置（幂等，不破坏向导设置）；最后回退公网 IP
-	local trusted="${DOMAIN:-}"
+# 访问地址（= DSH --trusted-host = Caddy 站点地址）必须在写站点块之前确定：
+# 域名优先；重装且未传 --domain 时沿用已有配置（含向导改过的域名）；最后回退公网 IP。
+TRUSTED_HOST=""
+CFG_DOMAIN=""
+resolve_trusted_host() {
+	TRUSTED_HOST="${DOMAIN:-}"
 	local existing_domain=""
-	if [[ -z "$trusted" && $REINSTALL -eq 1 ]]; then
+	if [[ -z "$TRUSTED_HOST" && $REINSTALL -eq 1 ]]; then
 		if [[ -f "$INSTALL_ROOT/state/gate.env" ]]; then
-			trusted=$(sed -n 's/^DSH_TRUSTED_HOST=//p' "$INSTALL_ROOT/state/gate.env" | tail -1)
+			TRUSTED_HOST=$(sed -n 's/^DSH_TRUSTED_HOST=//p' "$INSTALL_ROOT/state/gate.env" | tail -1)
 		fi
 		if [[ -f "$INSTALL_ROOT/state/config.json" ]]; then
 			existing_domain=$(sed -n 's/.*"domain": *"\([^"]*\)".*/\1/p' "$INSTALL_ROOT/state/config.json" | tail -1)
 		fi
 	fi
-	[[ -n "$trusted" ]] || trusted=$(detect_public_ip)
-	local cfg_domain="${DOMAIN:-$existing_domain}"
+	if [[ -z "$TRUSTED_HOST" ]]; then
+		TRUSTED_HOST=$(detect_public_ip)
+	fi
+	CFG_DOMAIN="${DOMAIN:-$existing_domain}"
+}
+
+step7_systemd() {
+	log "步骤 7/9：systemd 服务"
+	mkdir -p "$INSTALL_ROOT/state" "$INSTALL_ROOT/backups"
+
+	local trusted="$TRUSTED_HOST"
+	local cfg_domain="$CFG_DOMAIN"
 
 	# gate.env：集中管理运行环境变量（0600 属主 dsh，M3 向导改域名后重写并 restart 即可）
 	cat >"$INSTALL_ROOT/state/gate.env" <<EOF
@@ -436,12 +446,7 @@ step9_verify() {
 		sleep 2
 	done
 
-	local url
-	if [[ -n "$DOMAIN" ]]; then
-		url="https://$DOMAIN"
-	else
-		url="https://$(detect_public_ip)"
-	fi
+	local url="https://$TRUSTED_HOST"
 	local open_url="$url"
 	[[ -n "$SETUP_TOKEN" ]] && open_url="$url/setup?token=$SETUP_TOKEN"
 
@@ -454,7 +459,7 @@ step9_verify() {
 	if [[ -n "$SETUP_TOKEN" ]]; then
 		echo "             （初始设置需要上面的一次性令牌，别用不带令牌的地址）"
 	elif [[ -z "$DOMAIN" ]]; then
-		echo "             （未传 --domain，当前为自签证书过渡；域名可稍后在浏览器向导中填写）"
+		echo "             （未传 --domain，当前为自签证书过渡，浏览器会提示证书不受信任；域名可稍后在向导中填写）"
 	fi
 	echo " 服务/日志 : systemctl status dsh-gate | journalctl -u dsh-gate -f"
 	echo " 管理命令  : dsh-vps status | restart | upgrade | rollback | reset-admin | setup-url | backup"
@@ -479,6 +484,7 @@ step2_node
 step3_dsh
 step4_user
 step5_gate
+resolve_trusted_host
 step6_caddy
 step7_systemd
 step8_firewall

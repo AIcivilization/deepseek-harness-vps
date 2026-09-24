@@ -786,6 +786,9 @@ PrivateKey = $(tr -d '[:space:]' <"$VPN_DIR/server.key")
 SaveConfig = false
 EOF
 		chmod 600 "$WG_CONF"
+	elif ! grep -q "dsh-vps" "$WG_CONF"; then
+		# 不接管别人的 wg0：往里追加设备会改掉你原有的隧道，卸载时也分不清该不该删
+		die "${WG_CONF} 已存在且不是 dsh-vps 创建的（你自己的 WireGuard？）。为避免改动它，本命令已停止。"
 	else
 		log "已有 ${WG_CONF}，保留接口与已签发的设备"
 	fi

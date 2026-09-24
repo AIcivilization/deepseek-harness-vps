@@ -64,8 +64,8 @@ if [[ $ASSUME_YES -eq 0 ]]; then
   - 服务        ${SERVICE}（停止并禁用，删除 ${UNIT_FILE}）
   - 安装目录    ${INSTALL_ROOT}（含 gate 代码、state、备份）
   - 命令        /usr/local/bin/dsh-vps
-  - Caddy 站点  $CADDY_SITE_FILE${PURGE_CADDY:+（并移除 caddy 软件包）}
-  - 隧道        /etc/wireguard/wg0.conf（dsh-vps vpn 建过才有）
+  - Caddy 站点  $CADDY_SITE_FILE$([ $PURGE_CADDY -eq 1 ] && echo "（并移除 caddy 软件包）")
+  - 隧道        /etc/wireguard/wg0.conf（仅当它是 dsh-vps vpn 创建的；你自己的 wg0 不动）
   - DSH 数据    $DSH_HOME_DIR$([ $KEEP_DATA -eq 1 ] && echo "（--keep-data：保留）" || echo "（删除）")
   - 系统用户    $DSH_USER$([ $KEEP_DATA -eq 1 ] && echo "（--keep-data：保留）" || echo "（保留，重装可复用）")
 
@@ -88,6 +88,9 @@ targets=()
 if [[ -d "$INSTALL_ROOT/state" ]]; then targets+=("${INSTALL_ROOT#/}/state"); fi
 if [[ -d "$INSTALL_ROOT/backups" ]]; then targets+=("${INSTALL_ROOT#/}/backups"); fi
 if [[ -d "$DSH_HOME_DIR" ]]; then targets+=("${DSH_HOME_DIR#/}"); fi
+# Caddyfile 下一步会被改写，先连同站点块一起进备份
+if [[ -f "$CADDYFILE" ]]; then targets+=("${CADDYFILE#/}"); fi
+if [[ -f "$CADDY_SITE_FILE" ]]; then targets+=("${CADDY_SITE_FILE#/}"); fi
 if [[ ${#targets[@]} -gt 0 ]]; then
 	tar -czf "$BACKUP" -C / "${targets[@]}" 2>/dev/null || warn "部分文件无法打包（继续卸载）"
 	chmod 600 "$BACKUP"
@@ -128,10 +131,20 @@ log "步骤 4/6：移除 Caddy 站点块"
 if [[ -f "$CADDY_SITE_FILE" ]]; then
 	rm -f "$CADDY_SITE_FILE"
 fi
-if [[ -f "$CADDYFILE" ]] && grep -q "^import $CADDY_SITE_FILE" "$CADDYFILE"; then
-	# 只剩我们这一行 import：换回占位 Caddyfile，避免 Caddy 因 import 缺失而启动失败
-	printf '# Caddyfile 已被 dsh-vps 卸载脚本重置（原文件备份见 /root/%s）\n' "${BACKUP##*/}" > "$CADDYFILE" \
-		|| warn "Caddyfile 重置失败，请手工检查 $CADDYFILE"
+if [[ -f "$CADDYFILE" ]] && grep -qF "import $CADDY_SITE_FILE" "$CADDYFILE"; then
+	# install.sh 覆盖前留下的原文件（Caddyfile.bak.<时间戳>）：取最新一份不含本产品 import 的还原；
+	# 没有则换成占位文件，避免 Caddy 因 import 缺失而启动失败。
+	orig=""
+	for f in $(ls -1t "$CADDYFILE".bak.* 2>/dev/null); do
+		if ! grep -qF "import $CADDY_SITE_FILE" "$f"; then orig="$f"; break; fi
+	done
+	if [[ -n "$orig" ]]; then
+		cp "$orig" "$CADDYFILE" && log "已还原安装前的 Caddyfile（来自 $orig）" \
+			|| warn "Caddyfile 还原失败，请手工检查 $CADDYFILE"
+	else
+		printf '# Caddyfile 已被 dsh-vps 卸载脚本重置（原内容已备份进 %s）\n' "${BACKUP:-（无备份）}" >"$CADDYFILE" \
+			|| warn "Caddyfile 重置失败，请手工检查 $CADDYFILE"
+	fi
 fi
 if command -v caddy >/dev/null 2>&1; then
 	systemctl reload caddy 2>/dev/null || systemctl restart caddy 2>/dev/null || true
@@ -149,7 +162,9 @@ fi
 ## region: 步骤 5：隧道
 
 log "步骤 5/6：移除隧道"
-if [[ -f /etc/wireguard/wg0.conf ]]; then
+if [[ -f /etc/wireguard/wg0.conf ]] && ! grep -q "dsh-vps" /etc/wireguard/wg0.conf; then
+	log "wg0.conf 不是 dsh-vps 创建的，保留不动"
+elif [[ -f /etc/wireguard/wg0.conf ]]; then
 	systemctl stop wg-quick@wg0 2>/dev/null || true
 	systemctl disable wg-quick@wg0 2>/dev/null || true
 	rm -f /etc/wireguard/wg0.conf

@@ -271,10 +271,15 @@ function verifyAdmin(admin, username, password) {
 
 let sessionKey = null; // main() 中初始化
 
-function signSession(username, expiresMs) {
-	const body = `${b64u(Buffer.from(username, "utf8"))}.${expiresMs}`;
-	const mac = b64u(crypto.createHmac("sha256", sessionKey).update(body).digest());
-	return `${body}.${mac}`;
+// 会话 MAC 绑定当前管理员记录（盐值在每次设置/重置密码时重新生成）：
+// reset-admin、改密码或删除 admin.json 后，所有旧会话立即作废，无需重启 gate。
+function sessionMac(admin, body) {
+	return b64u(crypto.createHmac("sha256", sessionKey).update(`${admin.salt}\n${admin.username}\n${body}`).digest());
+}
+
+function signSession(admin, expiresMs) {
+	const body = `${b64u(Buffer.from(admin.username, "utf8"))}.${expiresMs}`;
+	return `${body}.${sessionMac(admin, body)}`;
 }
 
 function sessionUser(req) {
@@ -283,24 +288,26 @@ function sessionUser(req) {
 	const parts = value.split(".");
 	if (parts.length !== 3) return void 0;
 	const [user64, expiresStr, mac] = parts;
-	const expectedMac = b64u(crypto.createHmac("sha256", sessionKey).update(`${user64}.${expiresStr}`).digest());
-	if (!timingSafeEqualStr(mac, expectedMac)) return void 0;
+	const admin = loadAdmin();
+	if (!admin) return void 0;
+	if (!timingSafeEqualStr(mac, sessionMac(admin, `${user64}.${expiresStr}`))) return void 0;
 	const expiresMs = Number(expiresStr);
 	if (!Number.isSafeInteger(expiresMs) || expiresMs <= Date.now()) return void 0;
 	try {
-		return Buffer.from(user64, "base64url").toString("utf8");
+		const username = Buffer.from(user64, "base64url").toString("utf8");
+		return username === admin.username ? username : void 0;
 	} catch {
 		return void 0;
 	}
 }
 
-function sessionCookieHeader(req, username) {
+function sessionCookieHeader(req, admin) {
 	const expiresMs = Date.now() + SESSION_TTL_MS;
 	// 站点一律 HTTPS（Caddy 自动签发，或自签过渡），Secure 无条件加上。
 	// 不读 x-forwarded-proto：那是个可被伪造的请求头，值得信任的只有"这里就是 HTTPS"这件事本身。
 	const secure = process.env.GATE_COOKIE_SECURE !== "0";
 	return [
-		`${SESSION_COOKIE}=${signSession(username, expiresMs)}`,
+		`${SESSION_COOKIE}=${signSession(admin, expiresMs)}`,
 		`Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
 		"Path=/",
 		"HttpOnly",
@@ -538,7 +545,7 @@ function upstreamCookieHeader(clientCookieHeader, authority) {
 		if (key === SESSION_COOKIE || key.startsWith(DSH_COOKIE_PREFIX)) continue;
 		parts.push(`${key}=${value}`);
 	}
-	if (dsh.cookie && authority !== void 0 && dsh.cookie.authority === authority) {
+	if (dsh.cookie && authority !== void 0 && dsh.cookie.authority === authority && dsh.cookie.expiresAt > Date.now()) {
 		parts.push(`${dsh.cookie.name}=${dsh.cookie.value}`);
 	}
 	return parts.length ? parts.join("; ") : void 0;
@@ -663,7 +670,7 @@ async function handleLogin(req, res) {
 	log(`login ok from ${ip} (${username})`);
 	res.writeHead(303, {
 		location: next,
-		"set-cookie": sessionCookieHeader(req, username),
+		"set-cookie": sessionCookieHeader(req, admin),
 		"cache-control": "no-store",
 	});
 	res.end();
@@ -917,6 +924,12 @@ function proxyHttp(req, res) {
 			upRes.pipe(res);
 		},
 	);
+	// CONNECT_TIMEOUT_MS 只约束"连上 DSH"这一步。连上后清掉超时：DSH 的非流式 API
+	// （如一次完整的模型调用）可能很久才回响应头，不能被当成连接超时切成 502。
+	upstreamReq.on("socket", (socket) => {
+		if (socket.connecting) socket.once("connect", () => upstreamReq.setTimeout(0));
+		else upstreamReq.setTimeout(0); // keep-alive 复用的连接早已连上
+	});
 	upstreamReq.on("timeout", () => {
 		if (!responded) upstreamReq.destroy(new Error("upstream connect timeout"));
 	});
@@ -1055,7 +1068,7 @@ function providedSetupToken(req, form) {
 /** 服务端身份调用 DSH 特权 RPC（走已注入的会话 Cookie，等价于"登录态探测"）。 */
 function dshRpc(method, args) {
 	return new Promise((resolve, reject) => {
-		if (!dsh.cookie) {
+		if (!dsh.cookie || dsh.cookie.expiresAt <= Date.now()) {
 			reject(new Error("dsh session not ready"));
 			return;
 		}
@@ -1385,9 +1398,8 @@ ${REPO_CSS}
 <h1>dsh-vps 初始设置</h1>
 <p class="sub">初始设置向导需要启动令牌</p>
 <p class="err">当前链接缺少启动令牌或令牌不正确。向导只对持有令牌的人开放。</p>
-<p style="font-size:14px;color:#9aa7b8;margin:0 0 4px">在服务器上执行下面任一命令获取带令牌的链接：</p>
+<p style="font-size:14px;color:#9aa7b8;margin:0 0 4px">在服务器上执行下面的命令获取带令牌的链接：</p>
 <p style="margin:6px 0 0"><code style="display:block;padding:9px 10px;border-radius:8px;background:#0d1219;color:#93c5fd;font-size:13px;overflow-x:auto">sudo dsh-vps setup-url</code></p>
-<p style="margin:6px 0 0"><code style="display:block;padding:9px 10px;border-radius:8px;background:#0d1219;color:#93c5fd;font-size:13px;overflow-x:auto">sudo journalctl -u dsh-gate | grep setup-url</code></p>
 <p class="hint" style="margin:16px 0 0">安装结束时该链接已打印在终端里。</p>
 ${repoLink()}
 </main>
@@ -1595,10 +1607,9 @@ function main() {
 						return;
 					}
 					if (setupOpen()) {
-						// 带上启动令牌，免得用户先看到"缺少令牌"页再手工拼 URL
-						const tok = loadSetupToken();
-						const target = tok ? `/setup?token=${encodeURIComponent(tok)}` : "/setup";
-						res.writeHead(303, { location: target, "cache-control": "no-store" });
+						// 绝不能在这里把令牌拼进跳转地址：此刻来访者尚未证明任何身份，
+						// 带上令牌等于把管理员注册权发给整个公网。无令牌时 /setup 会显示「需要令牌」页。
+						res.writeHead(303, { location: "/setup", "cache-control": "no-store" });
 						res.end();
 						return;
 					}
@@ -1627,7 +1638,11 @@ function main() {
 
 	// DSH Cookie 续期：剩余有效期 < 24h 时用同一 launchToken 重新兑换
 	setInterval(() => {
-		if (dsh.cookie && dsh.cookie.expiresAt - Date.now() < 24 * 3_600_000) {
+		if (dsh.cookie && dsh.cookie.expiresAt <= Date.now()) {
+			// 续期一直没成功（例如将来 DSH 改为一次性 launchToken）：重启子进程拿新令牌，
+			// 否则页面会永远停在"正在启动"。
+			restartDsh("dsh session cookie expired");
+		} else if (dsh.cookie && dsh.cookie.expiresAt - Date.now() < 24 * 3_600_000) {
 			log("renewing dsh session cookie");
 			exchangeToken(0);
 		}

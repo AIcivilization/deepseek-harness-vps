@@ -17,6 +17,7 @@
  */
 
 const fs = require("node:fs");
+const net = require("node:net");
 const path = require("node:path");
 
 const DEFAULT_SUBNET = "10.7.0.0/24";
@@ -50,14 +51,28 @@ function proxyLines(port, indent) {
  * @param {string} host 站点地址（域名 / IP / :443）
  * @param {{gatePort?: number, vpn?: {on: boolean, subnet: string}}} opts
  */
+/** 站点地址是否为裸 IP：公网 CA 不给 IP 签证书（至少不稳定），只能由 Caddy 内置 CA 签。 */
+function isIpHost(host) {
+	return net.isIP(String(host).replace(/^\[|\]$/g, "")) !== 0;
+}
+
 function caddySiteBlock(host, opts = {}) {
 	const port = opts.gatePort || DEFAULT_GATE_PORT;
 	const vpn = opts.vpn || { on: false, subnet: DEFAULT_SUBNET };
-	if (!vpn.on) return `${host} {\n${proxyLines(port, "\t")}}\n`;
+	// IP 站点：浏览器按 IP 访问时不发 SNI，Caddy 会退而按本机网卡地址找证书；
+	// 云主机网卡上多是内网地址（公网 IP 经 NAT），于是找不到证书、握手失败。
+	// default_sni 让无 SNI 的连接按公网 IP 选证书。本文件被主 Caddyfile 第一行 import，
+	// 全局选项块因此仍位于配置开头，合法。
+	const ip = isIpHost(host);
+	const globals = ip ? `{\n\tdefault_sni ${host}\n}\n\n` : "";
+	const tls = ip ? "\ttls internal\n" : "";
+	if (!vpn.on) return `${globals}${host} {\n${tls}${proxyLines(port, "\t")}}\n`;
 	// 隧道模式：非隧道来源直接断连，连响应体都不给。
 	// ACME HTTP-01 挑战由 Caddy 在路由之前处理（fall-through），不受本块影响，证书照常续期。
 	return (
+		globals +
 		`${host} {\n` +
+		tls +
 		`\t@tunnel remote_ip ${vpn.subnet}\n` +
 		`\thandle @tunnel {\n` +
 		proxyLines(port, "\t\t") +
@@ -67,7 +82,7 @@ function caddySiteBlock(host, opts = {}) {
 	);
 }
 
-module.exports = { caddySiteBlock, readVpnEnv, DEFAULT_SUBNET, DEFAULT_GATE_PORT };
+module.exports = { caddySiteBlock, readVpnEnv, isIpHost, DEFAULT_SUBNET, DEFAULT_GATE_PORT };
 
 if (require.main === module) {
 	const host = process.argv[2];
