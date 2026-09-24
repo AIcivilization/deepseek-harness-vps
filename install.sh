@@ -21,8 +21,11 @@ DSH_VERSION="0.1.5-rc.2" # 钉住版本（设计文档 §10 已验证版本表�
 # 预发布波次，解析结果就整体漂上去。2026-09-22 上游发了 0.1.5-rc.3 波次，但漏发了
 # dsh-client-ui-sidebar-documentpreview，于是 ETARGET 装不上。用 --before 把解析冻结在
 # 验证通过的那个时间点之前，装到的就是验证过的那棵树。升级 DSH_VERSION 时同步推后这个值。
+# 注意：同一天 03:46 上游还先发了一批 cordis 系列（cordis 4.0.3 / cordis-plugin-hmr 1.0.18 等），
+# 与 rc.2 不兼容——web profile 启动即报 "user patch-layer watching requires the Cordis HMR service"。
+# 冻结点必须早于这一批，所以是 03:40 而不是 05:00。
 # 设为 none 可关闭冻结。
-DSH_RESOLVE_BEFORE="${DSH_RESOLVE_BEFORE:-2026-09-22T05:00:00Z}"
+DSH_RESOLVE_BEFORE="${DSH_RESOLVE_BEFORE:-2026-09-22T03:40:00Z}"
 INSTALL_ROOT="/opt/dsh-vps"
 DSH_USER="dsh"
 DSH_HOME_DIR="/home/dsh/.dsh"
@@ -425,24 +428,30 @@ wait_gate_health() {
 
 step9_verify() {
 	log "步骤 9/9：健康自检"
-	local body
+	local body healthy=1
 	body=$(wait_gate_health) || {
 		warn "gate 未就绪，请查看: journalctl -u dsh-gate -n 50"
 		die "健康检查失败（gate）"
 	}
-	# 等待 DSH 子进程启动 + launchToken 兑换完成（冷启动需要几秒到几十秒）
+	# 等待 DSH 子进程启动 + launchToken 兑换完成（冷启动需要几秒到几十秒，小内存机器更久）
 	local i
-	for i in $(seq 1 30); do
+	for i in $(seq 1 60); do
 		body=$(curl -fsS --max-time 3 "http://127.0.0.1:$GATE_PORT/gate/health" 2>/dev/null) || true
 		if printf '%s' "$body" | grep -q '"launchTokenCaptured":true' \
 			&& printf '%s' "$body" | grep -q '"dshCookie":{"authority"'; then
 			log "gate 正常，DSH 会话兑换成功"
 			break
 		fi
-		[[ $i -eq 30 ]] && {
-			warn "DSH 会话兑换超时，请查看: journalctl -u dsh-gate -n 50"
-			die "健康检查失败（DSH cookie 兑换）"
-		}
+		if [[ $i -eq 60 ]]; then
+			# 不在这里退出：令牌链接只在下面打印，退出了用户就只剩"缺少令牌"页
+			healthy=0
+			warn "DSH 会话兑换超时（DSH 可能仍在启动，或启动失败）"
+			local err
+			err=$(printf '%s' "$body" | sed -n 's/.*"lastError":"\([^"]*\)".*/\1/p')
+			[[ -n "$err" ]] && warn "最近错误: $err"
+			warn "排查: journalctl -u dsh-gate -n 80 --no-pager"
+			break
+		fi
 		sleep 2
 	done
 
@@ -452,7 +461,11 @@ step9_verify() {
 
 	echo
 	echo "============================================================"
-	echo " dsh-vps 安装完成"
+	if [[ $healthy -eq 1 ]]; then
+		echo " dsh-vps 安装完成"
+	else
+		echo " dsh-vps 已安装，但 DSH 尚未就绪（见上方警告；页面会显示启动进度与错误）"
+	fi
 	echo "------------------------------------------------------------"
 	echo " DSH 版本  : ${DSH_VERSION}（钉住）"
 	echo " 访问地址  : $open_url"

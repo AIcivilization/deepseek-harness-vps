@@ -28,8 +28,9 @@ VERSIONS_URL="${DSHVPS_VERSIONS_URL:-$RAW_BASE/versions.json}"
 # 依赖解析冻结时间点的兜底值（版本表里带 resolve_before 时以版本表为准）。
 # 只钉顶层包版本不够：DSH 子包依赖是 ^x 浮动范围，上游发新预发布波次时解析结果会整体漂上去
 # ——2026-09-22 上游漏发 rc.3 的 dsh-client-ui-sidebar-documentpreview 就导致过 ETARGET。
+# 同日 03:46 的 cordis 系列新版本同样与 rc.2 不兼容（HMR 服务缺失致启动崩溃），故取 03:40。
 # 升级 latest_verified 时必须同步推后这个值。
-DEFAULT_RESOLVE_BEFORE="${DSHVPS_RESOLVE_BEFORE:-2026-09-22T05:00:00Z}"
+DEFAULT_RESOLVE_BEFORE="${DSHVPS_RESOLVE_BEFORE:-2026-09-22T03:40:00Z}"
 VERSIONS_CACHE="$ROOT/state/versions.cache.json"
 NPM_REGISTRY="${DSHVPS_NPM_REGISTRY:-}"
 

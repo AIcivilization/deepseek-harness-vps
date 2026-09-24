@@ -348,6 +348,7 @@ const dsh = {
 	token: null, // 当前进程的 launchToken
 	cookie: null, // { name, value, expiresAt, authority }
 	restarts: 0,
+	cookieAcquired: false, // 当前子进程是否兑换成功过（区分"启动即崩"与"运行后退出"）
 	startedAt: 0,
 	shuttingDown: false,
 	lastError: null, // 最近一次阻塞性故障（人类可读，供 /gate/health 与等待页展示）
@@ -404,6 +405,7 @@ function spawnDsh() {
 	dsh.startedAt = Date.now();
 	dsh.token = null;
 	dsh.cookie = null;
+	dsh.cookieAcquired = false;
 
 	let scanBuf = "";
 	const scan = (chunk) => {
@@ -433,10 +435,14 @@ function spawnDsh() {
 				const uptimeMs = Date.now() - dsh.startedAt;
 				dsh.lastExit = { code, signal, at: Date.now(), uptimeMs };
 				dsh.restarts += 1;
-				// 快速退出（<5s）多半是端口/配置类硬故障：退避重启，避免空转打满 journal
-				dsh.crashStreak = uptimeMs < 5000 ? dsh.crashStreak + 1 : 0;
+				// 快速退出，或还没兑换到会话就退出：多半是端口/依赖/配置类硬故障，退避重启，避免空转打满 journal。
+				// 不能只看存活时长——DSH 可能先打印 launchToken 再崩（如依赖不兼容），存活时间会超过 5s。
+				const crashed = uptimeMs < 5000 || !dsh.cookieAcquired;
+				dsh.crashStreak = crashed ? dsh.crashStreak + 1 : 0;
 				const delay = dsh.crashStreak > 1 ? Math.min(2000 * 2 ** (dsh.crashStreak - 1), 30_000) : 2000;
 				if (dsh.crashStreak >= 3) {
+					const errLine = (dsh.outputTail.match(/^\s*(?:[A-Za-z]*Error|error):.*$/gm) || []).pop();
+					if (errLine && !dsh.lastError) dsh.lastError = `DSH 连续 ${dsh.crashStreak} 次启动失败：${errLine.trim()}。详见 journalctl -u dsh-gate -n 100`;
 					dsh.lastError = dsh.lastError || `DSH 连续 ${dsh.crashStreak} 次快速退出（最近一次 code=${code} signal=${signal}，存活 ${uptimeMs}ms）。常见原因：3080 端口被占用、DSH_BIN 路径失效、DSH_HOME 权限问题。详见 journalctl -u dsh-gate -n 100`;
 				}
 				setTimeout(spawnDsh, delay);
@@ -532,6 +538,7 @@ function applyDshCookie(setCookieLine) {
 		}
 	}
 	dsh.cookie = { name, value, expiresAt, authority: authorityOf(dshTrustedHost) };
+	dsh.cookieAcquired = true;
 	dsh.lastExchangeError = null;
 	dsh.lastError = null;
 	dsh.crashStreak = 0;

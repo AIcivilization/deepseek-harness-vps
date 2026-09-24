@@ -1,7 +1,7 @@
 {
   "latest_verified": "0.1.5-rc.2",
-  "resolve_before": "2026-09-22T05:00:00Z",
-  "updated_at": "2026-09-22",
+  "resolve_before": "2026-09-22T03:40:00Z",
+  "updated_at": "2026-09-24",
   "versions": [
     {
       "dsh": "0.1.5-rc.2",
