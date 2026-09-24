@@ -80,7 +80,7 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 - Ubuntu 22.04+ / Debian 12+ (root)
 - 2 vCPU / 2 GB RAM or better; ports 80/443 open
-- A domain gives you automatic HTTPS; a public IP with a self-signed certificate works too
+- A domain gives you automatic HTTPS (point its A record at the server first); a public IP with a self-signed certificate works too
 
 ---
 
@@ -93,10 +93,41 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 Add `--mirror cn` if you're behind the GFW (Node and DSH come from npmmirror).
 
-Or install through npm, running exactly the scripts shipped in this package (pinned, no network fetch):
+No domain yet? Drop `--domain` and use the public IP:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+```
+
+The certificate then comes from Caddy's internal CA, so the browser warns "Not secure / certificate not trusted". That is expected — proceed anyway. Add a domain in the wizard later and Caddy switches to a real certificate.
+
+Or install through npm, running exactly the scripts shipped in this package (pinned, no network fetch; needs Node 22+ on the machine):
 
 ```bash
 npx dsh-vps-install install --domain dsh.example.com
+```
+
+To pin a release instead of `main`, replace `main` with the version tag and point later gateway fetches at the same tag:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3/install.sh \
+  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3 bash -s -- --domain dsh.example.com
+```
+
+If the final self-check reports that DSH is not ready yet, the setup link is still printed; the page shows startup progress and the actual error. Troubleshoot with `journalctl -u dsh-gate -n 80 --no-pager`.
+
+## Update
+
+Update the gateway code on an installed machine:
+
+```bash
+sudo dsh-vps update-gate
+```
+
+Machines installed with v1.4.1 or earlier that crash on start with `user patch-layer watching requires the Cordis HMR service` got a wrong dependency freeze point (it pulled in cordis releases incompatible with DSH 0.1.5-rc.2). Delete the DSH directory and run the install command again; accounts and data are kept:
+
+```bash
+sudo systemctl stop dsh-gate && sudo rm -rf /opt/dsh-vps/dsh/0.1.5-rc.2
 ```
 
 ## Uninstall
@@ -106,13 +137,13 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
   | sudo bash -s -- --yes
 ```
 
-Removes the service, install directory, Caddy site block and the DSH data directory, packing a backup to `/root/dsh-vps-uninstall-<timestamp>.tar.gz` first. `--keep-data` keeps the DSH data, `--purge-caddy` removes Caddy as well. Uninstall then install again gives you a clean environment.
+Removes the service, install directory, Caddy site block and the DSH data directory, packing a backup (Caddyfile included) to `/root/dsh-vps-uninstall-<timestamp>.tar.gz` first. The Caddyfile you had before installing is restored, and only a wg0 created by `dsh-vps vpn` is removed — your own WireGuard setup is left alone. `--keep-data` keeps the DSH data, `--purge-caddy` removes Caddy as well. Uninstall then install again gives you a clean environment.
 
 ---
 
 ## First run
 
-Installation prints a **setup link carrying a one-time token** — open it to reach the wizard: admin username/password → (optional) domain, DeepSeek API key & bundled plugins → log in. The wizard only answers to holders of the token, and the token is voided once setup completes. Lost the link? Print it again:
+Installation prints a **setup link carrying a one-time token** — open it to reach the wizard (opening the bare IP or domain only shows a "setup token required" page, by design): admin username/password → (optional) domain, DeepSeek API key & bundled plugins → log in. The wizard only answers to holders of the token, and the token is voided once setup completes. Lost the link? Print it again:
 
 ```bash
 sudo dsh-vps setup-url
@@ -120,7 +151,7 @@ sudo dsh-vps setup-url
 
 Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
 
-The checked plugins install in the background (tens of seconds) and DSH restarts to activate them. Two of them:
+The checked plugins install in the background (tens of seconds), always at their latest npm version, and DSH restarts to activate them. Two of them:
 
 - **dsh-market**: browse, search and install community plugins and themes from Settings. Everything else is left to you — add whatever you want from the marketplace afterwards
 - **dsh-vps-manager**: manage this very VPS from inside DSH — `/vps-` queries that skip the model and cost no tokens, a terminal in the conversation, AI operations confirmed by risk level, and a recipe library. Add this machine under Settings → VPS Manager (SSH key login)
@@ -167,7 +198,7 @@ sudo dsh-vps update-gate   # pull and restart the gateway code itself (no git re
 sudo dsh-vps ownshost on   # apply the settings-page patch (restores settings on a public domain)
 sudo dsh-vps selfcheck     # run the regression self-check (login / RPC / WebSocket / session)
 sudo dsh-vps rollback      # switch back to the previous DSH version
-sudo dsh-vps reset-admin   # emergency reset if you lose the admin password (re-runs the wizard, new token)
+sudo dsh-vps reset-admin   # emergency reset if you lose the admin password (re-runs the wizard, new token, signs out every session)
 sudo dsh-vps setup-url     # re-print the setup link with its one-time token
 sudo dsh-vps backup        # back up data (keeps the latest 3)
 sudo dsh-vps vpn setup macbook  # build a WireGuard tunnel and switch to "tunnel only"

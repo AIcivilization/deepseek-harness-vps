@@ -85,7 +85,7 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 - Ubuntu 22.04+ / Debian 12+（root）
 - 2C2G 以上，端口 80/443 开放
-- 有域名即可自动 HTTPS；暂无域名也能先用公网 IP + 自签证书
+- 有域名即可自动 HTTPS（先把 A 记录解析到本机）；暂无域名也能先用公网 IP + 自签证书
 
 ---
 
@@ -103,10 +103,41 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
   | sudo bash -s -- --domain dsh.example.com --mirror cn
 ```
 
-走 npm 也行，装的是这个包自带的同一份脚本（版本固定，不联网拉取）：
+还没有域名？去掉 `--domain` 即可，按公网 IP 访问：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+```
+
+此时证书由 Caddy 内置 CA 自签，浏览器会提示「不安全 / 证书不受信任」，属预期现象，选择继续访问即可。之后在向导里填上域名，Caddy 自动换成正式证书。
+
+走 npm 也行，装的是这个包自带的同一份脚本（版本固定，不联网拉取；需本机已有 Node 22+）：
 
 ```bash
 npx dsh-vps-install install --domain dsh.example.com
+```
+
+想固定在某个发布版本（而非 `main`），把地址里的 `main` 换成版本 tag，并让后续拉取的网关文件也用同一版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3/install.sh \
+  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3 bash -s -- --domain dsh.example.com
+```
+
+安装末尾的自检若报「DSH 尚未就绪」，设置链接照样会打印；页面会显示启动进度与具体错误，排障见 `journalctl -u dsh-gate -n 80 --no-pager`。
+
+## 更新
+
+已安装的机器更新网关代码：
+
+```bash
+sudo dsh-vps update-gate
+```
+
+用 v1.4.1 及更早版本装出、启动即报 `user patch-layer watching requires the Cordis HMR service` 的机器，是当时依赖冻结点有误（装进了与 DSH 0.1.5-rc.2 不兼容的 cordis 新版本）。删掉 DSH 目录后重跑安装命令即可修复，账号与数据保留：
+
+```bash
+sudo systemctl stop dsh-gate && sudo rm -rf /opt/dsh-vps/dsh/0.1.5-rc.2
 ```
 
 ## 卸载
@@ -116,13 +147,13 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
   | sudo bash -s -- --yes
 ```
 
-删除服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份到 `/root/dsh-vps-uninstall-<时间戳>.tar.gz`。`--keep-data` 保留 DSH 数据，`--purge-caddy` 连 Caddy 一起移除。卸载完再跑安装命令即为全新环境。
+删除服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份（含 Caddyfile）到 `/root/dsh-vps-uninstall-<时间戳>.tar.gz`。安装前原有的 Caddyfile 会被还原；WireGuard 只移除 `dsh-vps vpn` 建的 wg0，你自己的隧道配置不动。`--keep-data` 保留 DSH 数据，`--purge-caddy` 连 Caddy 一起移除。卸载完再跑安装命令即为全新环境。
 
 ---
 
 ## 首次使用
 
-安装结束时终端会打印一条**带一次性令牌的初始设置链接**，浏览器打开它进入向导：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与预置插件 → 登录即用。向导只对持有令牌的人开放，令牌在设置完成后自动作废。链接丢了随时重取：
+安装结束时终端会打印一条**带一次性令牌的初始设置链接**，浏览器打开它进入向导（直接打开 IP 或域名只会看到「需要启动令牌」页，这是有意的）：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与预置插件 → 登录即用。向导只对持有令牌的人开放，令牌在设置完成后自动作废。链接丢了随时重取：
 
 ```bash
 sudo dsh-vps setup-url
@@ -130,7 +161,7 @@ sudo dsh-vps setup-url
 
 API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
-勾选的插件在后台安装（约几十秒），装完 DSH 自动重启生效，共两款：
+勾选的插件在后台安装（约几十秒），始终取 npm 上的最新版本，装完 DSH 自动重启生效，共两款：
 
 - **dsh-market**：设置页内浏览、搜索、一键安装社区插件与主题。其余插件留给你自己挑，装好后在市场里按需添加
 - **dsh-vps-manager**：在 DSH 里直接管理这台 VPS——`/vps-` 系列查询命令不经过模型、不花 token，对话内嵌终端，AI 操作按风险分级确认，另有运维菜谱库。需在 设置 → VPS Manager 中添加本机（SSH 密钥登录）
@@ -177,7 +208,7 @@ sudo dsh-vps update-gate   # 拉取并重启网关自身代码（安装目录非
 sudo dsh-vps ownshost on   # 应用设置页可用性补丁（公网域名下恢复设置页）
 sudo dsh-vps selfcheck     # 跑一遍回归自检（登录 / RPC / WebSocket / 会话）
 sudo dsh-vps rollback      # 切回上一 DSH 版本
-sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置（重新走向导并换发令牌）
+sudo dsh-vps reset-admin   # 忘记管理员密码时的应急重置（重新走向导并换发令牌，已登录的会话全部失效）
 sudo dsh-vps setup-url     # 重新打印带一次性令牌的初始设置链接
 sudo dsh-vps backup        # 备份数据（保留最近 3 份）
 sudo dsh-vps vpn setup macbook  # 建 WireGuard 隧道并切到「仅隧道可访问」
