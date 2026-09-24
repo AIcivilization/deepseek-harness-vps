@@ -21,6 +21,16 @@
 
 ---
 
+> **This is a VPS deployment tool for DSH, not a plugin you install inside DSH. Run the one-command install below on your VPS and it sets up DSH itself, complete with a login page.**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+```
+
+With a domain, or behind the GFW, append arguments at the end, e.g. `bash -s -- --domain dsh.example.com --mirror cn`. See [Install](#install) below.
+
+---
+
 ## Overview
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) trusts the operator's own browser only: its privileged interfaces — settings, API keys, plugin management — sit behind a browser-trust fence, and a plain reverse proxy to the public internet leaves those pages dead.

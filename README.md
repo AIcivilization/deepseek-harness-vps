@@ -22,6 +22,16 @@
 
 ---
 
+> **这是 DSH 的 VPS 部署工具，不是在 DSH 里安装的插件，在 VPS 上执行下面的一键安装命令，它会装好带登录界面的 DSH 本身。**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+```
+
+有域名、在国内网络时，在末尾追加参数，例如 `bash -s -- --domain dsh.example.com --mirror cn`，详见下方[安装](#安装)。
+
+---
+
 ## 简介
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）默认只认本机浏览器：它的特权接口（设置、API Key、插件管理）受浏览器信任围栏保护，直接反代到公网后这些页面全部失效。
