@@ -106,6 +106,16 @@ const FORWARDING_HEADERS = new Set(["forwarded", "x-forwarded-for", "x-real-ip"]
 // 在 gate 之外拉起一个新的 DSH 进程，抢占 3080 端口，gate 的子进程随后
 // EADDRINUSE 且再也抓不到 launchToken → 永久"会话尚未就绪"。
 const MARKET_RESTART_PATHS = new Set(["/dsh-market/restart", "/dsh-market/restart/"]);
+// dshmarket 1.64+ 的 v1 接口：内部直接调用上面那个旧端点（不经 HTTP），必须一起接管
+const MARKET_RESTART_V1_PATHS = new Set(["/dsh-market/api/v1/restart", "/dsh-market/api/v1/restart/"]);
+const MARKET_V1_SCHEMA = "dsh-market/update-api/v1";
+
+// dshmarket 的写操作（安装/更新/卸载/备份导出……）为防 DNS 重绑定，要求 Host 必须是回环地址，
+// Origin 必须与 Host 一致；经 gate 转发时 Host 是公网域名，于是一律 403 "untrusted origin"。
+// gate 已完成登录校验，这里替它做同样的同源检查（Origin 与公网 Host 一致、非跨站），
+// 通过后把 Host/Origin 改写成 DSH 的回环地址再转发。设 GATE_MARKET_LOOPBACK=0 可关闭。
+const MARKET_PREFIX = "/dsh-market/";
+const MARKET_LOOPBACK = process.env.GATE_MARKET_LOOPBACK !== "0";
 // 设 GATE_TAKEOVER_RESTART=0 则放行给 DSH 自己处理（会退回到上面那个坑，仅供对照排障）
 const TAKEOVER_RESTART = process.env.GATE_TAKEOVER_RESTART !== "0";
 
@@ -889,6 +899,11 @@ function proxyHttp(req, res) {
 	}
 	const cookie = upstreamCookieHeader(req.headers.cookie, authority);
 	if (cookie !== void 0) headers.cookie = cookie;
+	if (MARKET_LOOPBACK && (req.url || "").startsWith(MARKET_PREFIX)) {
+		const loopback = `127.0.0.1:${DSH_PORT}`;
+		headers.host = loopback;
+		if (headers.origin !== void 0) headers.origin = `http://${loopback}`;
+	}
 
 	let responded = false;
 	const upstreamReq = http.request(
@@ -952,6 +967,18 @@ function proxyHttp(req, res) {
 	req.pipe(upstreamReq);
 }
 
+/** 市场请求的同源检查：Origin（若有）须与浏览器访问的公网 Host 一致，且不是跨站请求。 */
+function marketRequestSameOrigin(req) {
+	if (String(req.headers["sec-fetch-site"] || "") === "cross-site") return false;
+	const origin = req.headers.origin;
+	if (origin === void 0) return true; // 同源 GET 导航（如备份下载）不带 Origin
+	try {
+		return new URL(origin).host === requestAuthority(req.headers);
+	} catch {
+		return false;
+	}
+}
+
 function denyUnauthenticated(req, res, pathname) {
 	if (pathname.startsWith("/api")) {
 		sendText(res, 401, "gate authentication required");
@@ -969,15 +996,16 @@ function denyUnauthenticated(req, res, pathname) {
  * 这里按官方客户端的协议回 202 + ok，然后由 gate 自己重启 DSH 子进程：
  * 子进程是全新的，/dsh-market/status 的 boot id 随之变化，前端会自动 reload。
  */
-function handleMarketRestart(req, res) {
+function handleMarketRestart(req, res, v1) {
 	if (req.method !== "POST") {
 		res.writeHead(405, { allow: "POST", "content-length": "0" });
 		res.end();
 		return;
 	}
-	log("market restart requested; gate takes over");
+	log(`market restart requested${v1 ? " (v1)" : ""}; gate takes over`);
+	const result = { ok: true, managedBy: "dsh-gate", note: "由 gate 重启 DSH 子进程" };
 	res.writeHead(202, { "content-type": "application/json", "cache-control": "no-store" });
-	res.end(JSON.stringify({ ok: true, managedBy: "dsh-gate", note: "由 gate 重启 DSH 子进程" }));
+	res.end(JSON.stringify(v1 ? { schema: MARKET_V1_SCHEMA, result } : result));
 	// 让 202 先落地，再动手（客户端随后轮询 /dsh-market/status 等 boot id 变化）
 	setTimeout(() => restartDsh("market restart"), 300);
 }
@@ -1666,7 +1694,12 @@ function main() {
 					denyUnauthenticated(req, res, pathname);
 					return;
 				}
-				if (TAKEOVER_RESTART && MARKET_RESTART_PATHS.has(pathname)) return handleMarketRestart(req, res);
+				if (pathname.startsWith(MARKET_PREFIX) && !marketRequestSameOrigin(req)) {
+					sendText(res, 403, "cross-origin market request refused by gate");
+					return;
+				}
+				if (TAKEOVER_RESTART && MARKET_RESTART_PATHS.has(pathname)) return handleMarketRestart(req, res, false);
+				if (TAKEOVER_RESTART && MARKET_RESTART_V1_PATHS.has(pathname)) return handleMarketRestart(req, res, true);
 				proxyHttp(req, res);
 			})
 			.catch((err) => {
