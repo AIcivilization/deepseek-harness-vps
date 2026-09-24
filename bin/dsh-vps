@@ -14,6 +14,8 @@
 #   tunnel              仅我可访问：SSH 本地端口转发（零安装，打印用法）
 #   backup              打包 DSH_HOME + state 到 backups/（保留最近 3 份）
 #   selfcheck           手动触发升级回归自检探针
+#   install-units       安装浏览器一键升级所需的 systemd 单元（install.sh / update-gate 调用）
+#   upgrade-run         执行浏览器发起的升级请求（由 dsh-vps-upgrade.service 以 root 调用）
 
 set -euo pipefail
 
@@ -30,9 +32,13 @@ VERSIONS_URL="${DSHVPS_VERSIONS_URL:-$RAW_BASE/versions.json}"
 # ——2026-09-22 上游漏发 rc.3 的 dsh-client-ui-sidebar-documentpreview 就导致过 ETARGET。
 # 同日 03:46 的 cordis 系列新版本同样与 rc.2 不兼容（HMR 服务缺失致启动崩溃），故取 03:40。
 # 升级 latest_verified 时必须同步推后这个值。
-DEFAULT_RESOLVE_BEFORE="${DSHVPS_RESOLVE_BEFORE:-2026-09-22T03:40:00Z}"
+DEFAULT_RESOLVE_BEFORE="${DSHVPS_RESOLVE_BEFORE:-2026-09-24T08:20:00Z}"
 VERSIONS_CACHE="$ROOT/state/versions.cache.json"
 NPM_REGISTRY="${DSHVPS_NPM_REGISTRY:-}"
+# 安装时选了 --mirror cn：升级也走 npmmirror，与首次安装同源
+if [[ -z "$NPM_REGISTRY" && -f "$ROOT/state/config.json" ]] && grep -q '"mirror": *"cn"' "$ROOT/state/config.json"; then
+	NPM_REGISTRY="https://registry.npmmirror.com"
+fi
 
 log()  { printf '\033[1;32m[dsh-vps]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[dsh-vps]\033[0m %s\n' "$*" >&2; }
@@ -92,11 +98,21 @@ cmd_update_gate() {
 		rm -f "$sb"
 		warn "gate/site-block.js 未更新（保留现有版本）"
 	fi
+	# dsh-vps 自身：先写临时文件再 rename，正在执行的旧脚本仍持有旧 inode，不会读到半截新内容
+	local nb="$ROOT/bin/dsh-vps.update"
+	if curl -fsSL --max-time 30 "$RAW_BASE/bin/dsh-vps" -o "$nb" && bash -n "$nb"; then
+		chmod 755 "$nb"
+		mv "$nb" "$ROOT/bin/dsh-vps"
+	else
+		rm -f "$nb"
+		warn "bin/dsh-vps 未更新（保留现有版本）"
+	fi
 	log "重启 $SERVICE ..."
 	systemctl restart "$SERVICE"
 	sleep 3
-	# 静态补丁与 gate 代码同源管理，顺手补齐（幂等）
-	ownshost_apply on >/dev/null 2>&1 || true
+	# 以下都用新版 dsh-vps 执行：静态补丁（含升级提示条）与一键升级单元（幂等）
+	"$ROOT/bin/dsh-vps" ownshost on >/dev/null 2>&1 || true
+	"$ROOT/bin/dsh-vps" install-units || warn "一键升级单元安装失败"
 	if curl -fsS --max-time 3 "$HEALTH_URL" >/dev/null 2>&1; then
 		log "更新完成，gate 已就绪"
 	else
@@ -194,7 +210,7 @@ switch_version() { # $1=版本目录名
 
 cmd_upgrade() {
 	require_root
-	local target="" latest_mode=0 assume_yes=0
+	local target="" latest_mode=0 assume_yes=0 verified_latest=0
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
 		--latest) latest_mode=1; shift ;;
@@ -211,11 +227,44 @@ cmd_upgrade() {
 	local resolve_before="$DEFAULT_RESOLVE_BEFORE"
 
 	if [[ $latest_mode -eq 1 ]]; then
-		warn "--latest：将安装 npm 上未经 dsh-vps 验证的最新版本，可能破坏兼容性（有备份与自动回滚兜底）"
+		warn "--latest：将安装官方最新版（npm latest 与 next 渠道中较新的一个），可能未经 dsh-vps 验证（有备份与自动回滚兜底）"
 		[[ $assume_yes -eq 1 ]] || { read -rp "确认继续？[y/N] " ans; [[ "$ans" == "y" || "$ans" == "Y" ]] || die "已取消"; }
-		local reg_arg=(version)
+		local reg_arg=(dist-tags --json)
 		[[ -n "$NPM_REGISTRY" ]] && reg_arg+=(--registry="$NPM_REGISTRY")
-		target=$(npm view @deepseek-ai/dsh "${reg_arg[@]}" 2>/dev/null) || die "无法查询 npm 最新版本"
+		# 官方同时维护 latest（正式）与 next（预览）两个渠道，取其中版本号更高的；alpha 等内部渠道不取
+		target=$(npm view @deepseek-ai/dsh "${reg_arg[@]}" 2>/dev/null | node -e '
+const t = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const parse = (v) => { const [c, p] = v.split("-", 2); return { c: c.split(".").map(Number), p: p === undefined ? null : p.split(".") }; };
+const cmp = (a, b) => {
+	const x = parse(a), y = parse(b);
+	for (let i = 0; i < 3; i++) if (x.c[i] !== y.c[i]) return x.c[i] - y.c[i];
+	if (x.p === null || y.p === null) return (x.p === null) - (y.p === null);
+	for (let i = 0; i < Math.max(x.p.length, y.p.length); i++) {
+		const p = x.p[i], q = y.p[i];
+		if (p === undefined || q === undefined) return p === undefined ? -1 : 1;
+		const pn = /^\d+$/.test(p), qn = /^\d+$/.test(q);
+		if (pn && qn && +p !== +q) return +p - +q;
+		if (pn !== qn) return pn ? -1 : 1;
+		if (p !== q) return p < q ? -1 : 1;
+	}
+	return 0;
+};
+const c = [t.latest, t.next].filter((v) => typeof v === "string" && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v));
+if (!c.length) process.exit(1);
+console.log(c.sort(cmp).pop());
+') || die "无法查询 npm 最新版本"
+		# 官方最新版恰好是我们验证过的版本：用验证时冻结的依赖树，而不是当下重新解析
+		local vt
+		if vt=$(curl -fsSL --max-time 10 "$VERSIONS_URL" 2>/dev/null) \
+			&& [[ "$(printf '%s' "$vt" | sed -n 's/.*"latest_verified": *"\([^"]*\)".*/\1/p' | head -1)" == "$target" ]]; then
+			local vrb
+			vrb=$(printf '%s' "$vt" | sed -n 's/.*"resolve_before": *"\([^"]*\)".*/\1/p' | head -1)
+			if [[ -n "$vrb" ]]; then
+				resolve_before="$vrb"
+				verified_latest=1
+				log "$target 是已验证版本，按验证时的依赖树安装（冻结于 $vrb）"
+			fi
+		fi
 	elif [[ -z "$target" ]]; then
 		# 默认：已验证版本表的 latest_verified
 		local versions
@@ -248,7 +297,7 @@ cmd_upgrade() {
 		local args=(--no-audit --no-fund --loglevel=error)
 		[[ -n "$NPM_REGISTRY" ]] && args+=(--registry="$NPM_REGISTRY")
 		local frozen=1
-		[[ $latest_mode -eq 1 || "$resolve_before" == "none" ]] && frozen=0
+		[[ ($latest_mode -eq 1 && $verified_latest -eq 0) || "$resolve_before" == "none" ]] && frozen=0
 		[[ $frozen -eq 1 ]] && args+=(--before="$resolve_before")
 		if ! npm install --prefix "$prefix" "${args[@]}" "@deepseek-ai/dsh@$target"; then
 			if [[ $frozen -eq 1 ]]; then
@@ -421,15 +470,21 @@ const MARK = "dsh-vps:ownshost";
 const SNIPPET =
 	'<script data-dsh-vps="ownshost">/* ' + MARK +
 	" */window.__DSH_TRANSPORT__=Object.assign(window.__DSH_TRANSPORT__||{},{ownsHost:true});</script>";
+// 升级提示条：同源脚本，由 gate 提供（/gate/ui.js）
+const UI_MARK = "dsh-vps:ui";
+const UI_SNIPPET = '<script data-dsh-vps="' + UI_MARK + '" src="/gate/ui.js" defer></script>';
 let s = fs.readFileSync(file, "utf8");
 const orig = file + ".orig";
 if (mode === "off") {
 	if (fs.existsSync(orig)) fs.copyFileSync(orig, file);
-	else fs.writeFileSync(file, s.split("\n").filter((l) => !l.includes(MARK)).join("\n"));
+	else fs.writeFileSync(file, s.split("\n").filter((l) => !l.includes(MARK) && !l.includes(UI_MARK)).join("\n"));
 	console.log("off");
 	process.exit(0);
 }
-if (s.includes(MARK)) {
+const missing = [];
+if (!s.includes(MARK)) missing.push(SNIPPET);
+if (!s.includes(UI_MARK)) missing.push(UI_SNIPPET);
+if (missing.length === 0) {
 	console.log("present");
 	process.exit(0);
 }
@@ -440,7 +495,7 @@ if (m === null) {
 	process.exit(1);
 }
 const at = m.index + m[0].length;
-fs.writeFileSync(file, s.slice(0, at) + "\n    " + SNIPPET + s.slice(at));
+fs.writeFileSync(file, s.slice(0, at) + missing.map((x) => "\n    " + x).join("") + s.slice(at));
 console.log("patched");
 NODE
 	node "$tmp" "$idx" "$mode" || rc=$?
@@ -883,6 +938,76 @@ EOF
 
 ## endregion
 
+## region: 浏览器一键升级
+
+# 页面上点「立即升级」→ gate（dsh 用户，无特权）只写 state/upgrade.request →
+# systemd path 单元看到文件 → 以 root 跑 dsh-vps upgrade-run。网页拿不到 root，
+# 能触发的只有这一条固定命令：升级到 npm 官方 latest（备份 → 自检 → 失败自动回滚）。
+UPGRADE_REQUEST="$ROOT/state/upgrade.request"
+UPGRADE_STATUS="$ROOT/state/upgrade.status.json"
+UPGRADE_LOG="$ROOT/state/upgrade.log"
+
+cmd_install_units() {
+	require_root
+	cat >/etc/systemd/system/dsh-vps-upgrade.path <<UNIT
+# dsh-vps：监听浏览器发起的 DSH 升级请求（由 dsh-vps install-units 生成）
+[Unit]
+Description=dsh-vps: watch for browser-initiated DSH upgrade requests
+
+[Path]
+PathExists=$UPGRADE_REQUEST
+Unit=dsh-vps-upgrade.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+	cat >/etc/systemd/system/dsh-vps-upgrade.service <<UNIT
+# dsh-vps：执行浏览器发起的 DSH 升级（由 dsh-vps install-units 生成）
+[Unit]
+Description=dsh-vps: run a DSH upgrade requested from the browser
+
+[Service]
+Type=oneshot
+ExecStart=$ROOT/bin/dsh-vps upgrade-run
+TimeoutStartSec=30min
+UNIT
+	systemctl daemon-reload
+	systemctl enable --now dsh-vps-upgrade.path >/dev/null 2>&1 || die "启用 dsh-vps-upgrade.path 失败"
+	log "浏览器一键升级已启用（dsh-vps-upgrade.path）"
+}
+
+write_upgrade_status() { # $1=state $2=from $3=to
+	local owner
+	owner=$(stat -c %U "$ROOT/state" 2>/dev/null || echo dsh)
+	printf '{"state":"%s","from":"%s","to":"%s","at":%s}\n' "$1" "$2" "$3" "$(date +%s)000" >"$UPGRADE_STATUS"
+	chown "$owner" "$UPGRADE_STATUS" 2>/dev/null || true
+	chmod 600 "$UPGRADE_STATUS"
+}
+
+cmd_upgrade_run() {
+	require_root
+	# 先删请求文件：path 单元在文件仍存在时会再次触发
+	[[ -f "$UPGRADE_REQUEST" ]] || exit 0
+	rm -f "$UPGRADE_REQUEST"
+	local from to rc=0 owner
+	from=$(current_version)
+	write_upgrade_status running "$from" ""
+	owner=$(stat -c %U "$ROOT/state" 2>/dev/null || echo dsh)
+	: >"$UPGRADE_LOG"
+	chown "$owner" "$UPGRADE_LOG" 2>/dev/null || true
+	chmod 600 "$UPGRADE_LOG"
+	# 独立进程执行：写在 `|| rc=$?` 里的函数/子 shell 会让 set -e 失效，出错也不停
+	"$ROOT/bin/dsh-vps" upgrade --latest --yes >>"$UPGRADE_LOG" 2>&1 || rc=$?
+	to=$(current_version)
+	if [[ $rc -eq 0 ]]; then
+		write_upgrade_status success "$from" "$to"
+	else
+		write_upgrade_status failed "$from" "$to"
+	fi
+}
+
+## endregion
+
 usage() {
 	cat <<'EOF'
 dsh-vps 管理命令
@@ -913,6 +1038,8 @@ reset-admin) shift; cmd_reset_admin "$@" ;;
 setup-url) cmd_setup_url ;;
 backup) cmd_backup ;;
 selfcheck) cmd_selfcheck ;;
+install-units) cmd_install_units ;;
+upgrade-run) cmd_upgrade_run ;;
 vpn) shift; cmd_vpn "$@" ;;
 tunnel) cmd_tunnel ;;
 "" | -h | --help) usage ;;

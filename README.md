@@ -9,7 +9,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/deepseek-harness-vps" alt="MIT 许可证"></a>
   <a href="https://www.npmjs.com/package/dsh-vps"><img src="https://img.shields.io/npm/v/dsh-vps" alt="npm 版本"></a>
   <img src="https://img.shields.io/badge/platform-Ubuntu%2022.04%2B%20%2F%20Debian%2012%2B-blue" alt="平台：Ubuntu 22.04+ / Debian 12+">
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.2-4176E6" alt="DeepSeek Harness 0.1.5-rc.2">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.7--rc.1-4176E6" alt="DeepSeek Harness 0.1.7-rc.1">
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="运行时依赖：0">
   <img src="https://img.shields.io/badge/Docker-not%20required-orange" alt="无需 Docker">
   <img src="https://img.shields.io/github/stars/AIcivilization/deepseek-harness-vps?style=social" alt="star">
@@ -138,17 +138,21 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 ## 更新
 
-已安装的机器更新网关代码：
+**DSH 本身跟随官方版本升级。** 网关每 6 小时检查一次 npm 上的官方最新版（正式渠道 latest 与预览渠道 next 中较新的一个），有新版本时 DSH 页面右下角弹出提示，点「立即升级」并确认即可：自动备份 → 安装新版 → 自检，自检不通过自动回滚到原版本，全程约 1–3 分钟。点「稍后」则这个版本不再提示。也可以在服务器上手动执行：
+
+```bash
+sudo dsh-vps upgrade            # 升到本项目验证过的版本
+sudo dsh-vps upgrade --latest   # 升到官方最新版（与页面上的「立即升级」相同）
+sudo dsh-vps rollback           # 切回上一个版本
+```
+
+**网关（登录页、代理）自身的更新**：
 
 ```bash
 sudo dsh-vps update-gate
 ```
 
-用 v1.4.1 及更早版本装出、启动即报 `user patch-layer watching requires the Cordis HMR service` 的机器，是当时依赖冻结点有误（装进了与 DSH 0.1.5-rc.2 不兼容的 cordis 新版本）。删掉 DSH 目录后重跑安装命令即可修复，账号与数据保留：
-
-```bash
-sudo systemctl stop dsh-gate && sudo rm -rf /opt/dsh-vps/dsh/0.1.5-rc.2
-```
+v1.5.0 之前安装的机器，重跑一次上方的一键安装命令即可获得页面升级提示（进入修复/更新模式，账号与数据保留）。
 
 ## 卸载
 

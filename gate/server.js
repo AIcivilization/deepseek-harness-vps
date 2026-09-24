@@ -94,6 +94,15 @@ const OWNS_HOST_SNIPPET =
 	`<script data-dsh-vps="ownshost">/* ${OWNS_HOST_MARK} */` +
 	"window.__DSH_TRANSPORT__=Object.assign(window.__DSH_TRANSPORT__||{},{ownsHost:true});</script>";
 let ownshostLogged = false;
+// 升级提示条：同源脚本 /gate/ui.js。bin/dsh-vps 的静态补丁同样写入它，两边共用同一标记。
+const UI_MARK = "dsh-vps:ui";
+const UI_SNIPPET = `<script data-dsh-vps="${UI_MARK}" src="/gate/ui.js" defer></script>`;
+
+// DSH 版本检测：跟随官方最新版（npm latest 与 next 渠道中较新的一个）。页面上确认后，gate 只写 state/upgrade.request，
+// 由 root 的 dsh-vps-upgrade.path/.service 执行升级（gate 自身无权改 /opt/dsh-vps/dsh）。
+const DSH_PACKAGE = "@deepseek-ai/dsh";
+const UPDATE_CHECK_INTERVAL_MS = 6 * 3_600_000;
+const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 // DSH 的若干特权端点（dsh-market 的 restart / backup 导出 / self-uninstall）要求
 // "直连回环"：只要出现 x-forwarded-for / x-real-ip / forwarded 任一头，
@@ -859,15 +868,18 @@ function collectAndInject(upRes, res, status, respHeaders) {
 			return;
 		}
 		// 静态文件补丁（bin/dsh-vps ownshost on）已经在页面里时不再重复注入
-		if (!body.includes(OWNS_HOST_MARK)) {
+		const missing = [];
+		if (!body.includes(OWNS_HOST_MARK)) missing.push(OWNS_HOST_SNIPPET);
+		if (!body.includes(UI_MARK)) missing.push(UI_SNIPPET);
+		if (missing.length) {
 			// 只有完整的 HTML 文档才改写；找不到 <head> 说明不是文档（片段/JSON 误标），原样转发
 			const at = body.search(/<head\b[^>]*>/i);
 			if (at !== -1) {
 				const end = body.indexOf(">", at) + 1;
-				body = body.slice(0, end) + OWNS_HOST_SNIPPET + body.slice(end);
+				body = body.slice(0, end) + missing.join("") + body.slice(end);
 				if (!ownshostLogged) {
 					ownshostLogged = true;
-					log("injected ownsHost by proxy (静态文件补丁未生效，建议 sudo dsh-vps ownshost on)");
+					log("injected page snippets by proxy (静态文件补丁未生效，建议 sudo dsh-vps ownshost on)");
 				}
 			}
 		}
@@ -1601,6 +1613,229 @@ async function handleSetup(req, res) {
 	res.end();
 }
 
+//#region DSH 版本检测与浏览器一键升级
+
+const update = { latest: null, checkedAt: 0, error: null };
+
+function upgradeRequestPath() {
+	return path.join(STATE_DIR, "upgrade.request");
+}
+
+function currentDshVersion() {
+	try {
+		const v = fs.readlinkSync(path.join(GATE_HOME, "dsh", "current"));
+		return SEMVER_PATTERN.test(v) ? v : null;
+	} catch {
+		return null;
+	}
+}
+
+/** semver 比较（含预发布段）：a>b 返回正数。 */
+function compareVersions(a, b) {
+	const split = (v) => {
+		const [core, pre] = v.split("-", 2);
+		return { core: core.split(".").map(Number), pre: pre === void 0 ? null : pre.split(".") };
+	};
+	const x = split(a);
+	const y = split(b);
+	for (let i = 0; i < 3; i++) if (x.core[i] !== y.core[i]) return x.core[i] - y.core[i];
+	if (x.pre === null || y.pre === null) return (x.pre === null) - (y.pre === null);
+	for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+		const p = x.pre[i];
+		const q = y.pre[i];
+		if (p === void 0 || q === void 0) return p === void 0 ? -1 : 1;
+		const pn = /^\d+$/.test(p);
+		const qn = /^\d+$/.test(q);
+		if (pn && qn && Number(p) !== Number(q)) return Number(p) - Number(q);
+		if (pn !== qn) return pn ? -1 : 1;
+		if (p !== q) return p < q ? -1 : 1;
+	}
+	return 0;
+}
+
+/** 官方 latest（正式）与 next（预览）两个渠道中版本号更高的一个；alpha 等内部渠道不取。 */
+function newestDshVersion() {
+	return new Promise((resolve) => {
+		const url = `${npmRegistry()}/-/package/${encodeURIComponent(DSH_PACKAGE).replace(/^%40/, "@")}/dist-tags`;
+		const req = https.get(url, { headers: { accept: "application/json" }, timeout: 10_000 }, (res) => {
+			const chunks = [];
+			res.on("data", (c) => chunks.push(c));
+			res.on("end", () => {
+				try {
+					const tags = res.statusCode === 200 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+					const candidates = [tags.latest, tags.next].filter((v) => typeof v === "string" && SEMVER_PATTERN.test(v));
+					resolve(candidates.length ? candidates.sort(compareVersions).pop() : null);
+				} catch {
+					resolve(null);
+				}
+			});
+		});
+		req.on("timeout", () => req.destroy());
+		req.on("error", () => resolve(null));
+	});
+}
+
+async function checkDshLatest() {
+	const v = await newestDshVersion();
+	update.checkedAt = Date.now();
+	if (v) {
+		if (v !== update.latest) log(`dsh latest on registry: ${v} (running ${currentDshVersion() || "unknown"})`);
+		update.latest = v;
+		update.error = null;
+	} else {
+		update.error = "无法查询 npm 最新版本";
+	}
+}
+
+function readUpgradeStatus() {
+	try {
+		const st = JSON.parse(fs.readFileSync(path.join(STATE_DIR, "upgrade.status.json"), "utf8"));
+		return st && typeof st.state === "string" ? st : null;
+	} catch {
+		return null;
+	}
+}
+
+function updateInfo() {
+	const current = currentDshVersion();
+	const latest = update.latest;
+	return {
+		current,
+		latest,
+		available: Boolean(current && latest && compareVersions(latest, current) > 0),
+		checkedAt: update.checkedAt || null,
+		error: update.error,
+		requested: fs.existsSync(upgradeRequestPath()),
+		status: readUpgradeStatus(),
+	};
+}
+
+/** GET：更新状态；POST：请求升级到官方最新版（写请求文件，交给 root 的 path 单元）。 */
+async function handleUpdate(req, res, user) {
+	const json = (status, body) => {
+		res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+		res.end(JSON.stringify(body));
+	};
+	if (req.method === "GET") return json(200, updateInfo());
+	if (req.method !== "POST") return json(405, { error: "method not allowed" });
+	// 触发的是 root 操作：必须是本站页面发起（fetch POST 必带 Origin）
+	const origin = req.headers.origin;
+	let sameOrigin = false;
+	try {
+		sameOrigin = origin !== void 0 && new URL(origin).host === requestAuthority(req.headers);
+	} catch {
+		/* 非法 Origin */
+	}
+	if (!sameOrigin || String(req.headers["sec-fetch-site"] || "") === "cross-site") return json(403, { error: "cross-origin request refused" });
+	await checkDshLatest(); // 以点击时的最新结果为准
+	const info = updateInfo();
+	if (info.requested || (info.status && info.status.state === "running")) return json(409, { error: "升级已在进行中" });
+	if (!info.available) return json(409, { error: "已是最新版本" });
+	fs.writeFileSync(upgradeRequestPath(), JSON.stringify({ target: info.latest, from: info.current, by: user, at: Date.now() }) + "\n", { mode: 0o600 });
+	log(`upgrade requested from browser by ${user}: ${info.current} -> ${info.latest}`);
+	return json(202, { ok: true, from: info.current, to: info.latest });
+}
+
+// 注入 DSH 页面的升级提示条（同源脚本，无外部依赖）。
+// 只做提示与确认；真正的升级由 root 服务执行，失败会自动回滚。
+const UI_JS = `(function () {
+	if (window.top !== window || document.getElementById("dshvps-update")) return;
+	var KEY = "dshvps-update-dismissed";
+	function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+	var box, timer, busy = false, asked = false;
+	function el(tag, css, text) { var n = document.createElement(tag); if (css) n.style.cssText = css; if (text) n.textContent = text; return n; }
+	var BTN = "margin-left:8px;padding:5px 12px;border-radius:7px;border:1px solid #2a3547;cursor:pointer;font:inherit;";
+	function render(msg, actions) {
+		if (!box) {
+			box = el("div", "position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:min(420px,calc(100vw - 32px));" +
+				"padding:12px 14px;border-radius:10px;background:#11161f;color:#dbe2ea;border:1px solid #2a3547;" +
+				"box-shadow:0 8px 30px rgba(0,0,0,.35);font:13px/1.6 system-ui,-apple-system,'Segoe UI',sans-serif");
+			box.id = "dshvps-update";
+			document.body.appendChild(box);
+		}
+		box.textContent = "";
+		box.appendChild(el("div", "", msg));
+		if (actions && actions.length) {
+			var row = el("div", "margin-top:8px;text-align:right");
+			actions.forEach(function (a) {
+				var b = el("button", BTN + (a.primary ? "background:#2563eb;color:#fff;border-color:#2563eb" : "background:#0d1219;color:#dbe2ea"), a.label);
+				b.onclick = a.onClick;
+				row.appendChild(b);
+			});
+			box.appendChild(row);
+		}
+	}
+	function hide() { if (box) { box.remove(); box = null; } }
+	function get() { return fetch("/gate/update", { cache: "no-store", credentials: "same-origin" }).then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }); }
+	function poll() {
+		get().then(function (u) {
+			var st = u.status;
+			if (u.requested || (st && st.state === "running")) {
+				render("正在升级 DeepSeek Harness" + (u.latest ? " 到 " + u.latest : "") + "…（约 1–3 分钟，期间页面会短暂不可用，请勿关闭）");
+				return;
+			}
+			if (st && asked && st.state === "success") {
+				render("升级完成（" + st.from + " → " + st.to + "），正在刷新…");
+				clearInterval(timer);
+				setTimeout(function () { location.reload(); }, 1500);
+				return;
+			}
+			if (st && asked && st.state === "failed") {
+				clearInterval(timer);
+				render("升级未成功，已自动回滚到 " + (st.to || st.from) + "，当前可继续使用。详情：sudo cat /opt/dsh-vps/state/upgrade.log", [{ label: "知道了", onClick: hide }]);
+				return;
+			}
+		}).catch(function () {
+			if (asked) render("正在升级，DeepSeek Harness 重启中…");
+		});
+	}
+	function start() {
+		if (busy) return;
+		if (!window.confirm("升级期间 DeepSeek Harness 会重启，约 1–3 分钟不可用。\\n升级前自动备份；新版本自检不通过会自动回滚到当前版本。\\n\\n确认升级？")) return;
+		busy = true;
+		fetch("/gate/update", { method: "POST", credentials: "same-origin" }).then(function (r) {
+			return r.json().then(function (b) { if (!r.ok) throw new Error(b.error || String(r.status)); return b; });
+		}).then(function () {
+			asked = true;
+			store("dshvps-update-asked", String(Date.now()));
+			render("已提交升级请求，等待开始…");
+			timer = setInterval(poll, 3000);
+		}).catch(function (e) {
+			busy = false;
+			render("无法开始升级：" + e.message, [{ label: "关闭", onClick: hide }]);
+		});
+	}
+	function init() {
+		// 升级过程中刷新了页面：继续跟进，完成后给出结果
+		var t = Number(store("dshvps-update-asked") || 0);
+		asked = t > 0 && Date.now() - t < 30 * 60000;
+		get().then(function (u) {
+			var st = u.status;
+			if (u.requested || (st && st.state === "running")) { asked = true; timer = setInterval(poll, 3000); poll(); return; }
+			if (asked && st && st.at > t) { store("dshvps-update-asked", "0"); if (st.state === "failed") poll(); return; }
+			if (!u.available || store(KEY) === u.latest) return;
+			render("DeepSeek Harness 有新版本 " + u.latest + "（当前 " + u.current + "）", [
+				{ label: "稍后", onClick: function () { store(KEY, u.latest); hide(); } },
+				{ label: "立即升级", primary: true, onClick: start },
+			]);
+		}).catch(function () {});
+	}
+	if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
+	else init();
+})();
+`;
+
+function handleUiJs(req, res) {
+	res.writeHead(200, {
+		"content-type": "text/javascript; charset=utf-8",
+		"cache-control": "no-cache",
+		"x-content-type-options": "nosniff",
+	});
+	res.end(req.method === "HEAD" ? void 0 : UI_JS);
+}
+
+//#endregion
+
 /** 升级回归自检（dsh-vps upgrade 调用）：健康 + token 兑换 + 登录态 credentials/describe 探针。 */
 async function handleSelfcheck(req, res) {
 	const report = {
@@ -1673,6 +1908,7 @@ function main() {
 				if (pathname === "/logout") return handleLogout(req, res);
 				if (pathname === "/gate/health") return handleHealthGuarded(req, res);
 				if (pathname === "/gate/selfcheck") return handleSelfcheckGuarded(req, res);
+				if (pathname === "/gate/ui.js") return handleUiJs(req, res);
 				if (pathname === "/setup") return handleSetup(req, res);
 				if (!loadAdmin()) {
 					// 尚未完成初始设置：浏览器导航导向导，/api 保持 401
@@ -1690,10 +1926,12 @@ function main() {
 					sendText(res, 503, "gate not configured: admin account missing (run `dsh-vps reset-admin`)");
 					return;
 				}
-				if (!sessionUser(req)) {
+				const user = sessionUser(req);
+				if (!user) {
 					denyUnauthenticated(req, res, pathname);
 					return;
 				}
+				if (pathname === "/gate/update") return handleUpdate(req, res, user);
 				if (pathname.startsWith(MARKET_PREFIX) && !marketRequestSameOrigin(req)) {
 					sendText(res, 403, "cross-origin market request refused by gate");
 					return;
@@ -1714,6 +1952,10 @@ function main() {
 	});
 
 	spawnDshWithPreflight();
+
+	// DSH 新版本检测：启动 1 分钟后查一次，之后每 6 小时一次
+	setTimeout(() => checkDshLatest().catch(() => {}), 60_000).unref();
+	setInterval(() => checkDshLatest().catch(() => {}), UPDATE_CHECK_INTERVAL_MS).unref();
 
 	// DSH Cookie 续期：剩余有效期 < 24h 时用同一 launchToken 重新兑换
 	setInterval(() => {

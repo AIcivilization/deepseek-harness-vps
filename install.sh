@@ -16,7 +16,7 @@ set -euo pipefail
 
 ## region: 常量与参数
 
-DSH_VERSION="0.1.5-rc.2" # 钉住版本（设计文档 §10 已验证版本表，勿随意改）
+DSH_VERSION="0.1.7-rc.1" # 钉住版本（设计文档 §10 已验证版本表，勿随意改）
 # 只钉顶层包版本是不够的：DSH 各子包的依赖是 ^0.1.5-rc.2 这类浮动范围，上游一发新的
 # 预发布波次，解析结果就整体漂上去。2026-09-22 上游发了 0.1.5-rc.3 波次，但漏发了
 # dsh-client-ui-sidebar-documentpreview，于是 ETARGET 装不上。用 --before 把解析冻结在
@@ -24,8 +24,9 @@ DSH_VERSION="0.1.5-rc.2" # 钉住版本（设计文档 §10 已验证版本表�
 # 注意：同一天 03:46 上游还先发了一批 cordis 系列（cordis 4.0.3 / cordis-plugin-hmr 1.0.18 等），
 # 与 rc.2 不兼容——web profile 启动即报 "user patch-layer watching requires the Cordis HMR service"。
 # 冻结点必须早于这一批，所以是 03:40 而不是 05:00。
+# 之后升到 0.1.7-rc.1（npm next 渠道），冻结点 2026-09-24T08:20Z——该时刻解析出的依赖树已逐包比对、实测通过。
 # 设为 none 可关闭冻结。
-DSH_RESOLVE_BEFORE="${DSH_RESOLVE_BEFORE:-2026-09-22T03:40:00Z}"
+DSH_RESOLVE_BEFORE="${DSH_RESOLVE_BEFORE:-2026-09-24T08:20:00Z}"
 INSTALL_ROOT="/opt/dsh-vps"
 DSH_USER="dsh"
 DSH_HOME_DIR="/home/dsh/.dsh"
@@ -391,6 +392,8 @@ EOF
 	systemctl enable dsh-gate >/dev/null 2>&1
 	systemctl restart dsh-gate
 	log "dsh-gate.service 已启动（DSH_TRUSTED_HOST=${trusted}）"
+	# 浏览器一键升级：DSH 有新版本时页面提示，确认后由 root 服务执行升级
+	"$INSTALL_ROOT/bin/dsh-vps" install-units || warn "一键升级单元安装失败（不影响使用，可稍后 sudo dsh-vps install-units）"
 }
 
 ## endregion

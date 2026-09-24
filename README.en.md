@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/deepseek-harness-vps" alt="MIT license"></a>
   <a href="https://www.npmjs.com/package/dsh-vps"><img src="https://img.shields.io/npm/v/dsh-vps" alt="npm version"></a>
   <img src="https://img.shields.io/badge/platform-Ubuntu%2022.04%2B%20%2F%20Debian%2012%2B-blue" alt="Platform: Ubuntu 22.04+ / Debian 12+">
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.5--rc.2-4176E6" alt="DeepSeek Harness 0.1.5-rc.2">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.7--rc.1-4176E6" alt="DeepSeek Harness 0.1.7-rc.1">
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="Runtime dependencies: 0">
   <img src="https://img.shields.io/badge/Docker-not%20required-orange" alt="No Docker required">
   <img src="https://img.shields.io/github/stars/AIcivilization/deepseek-harness-vps?style=social" alt="star">
@@ -128,17 +128,21 @@ If the final self-check reports that DSH is not ready yet, the setup link is sti
 
 ## Update
 
-Update the gateway code on an installed machine:
+**DSH itself follows official releases.** The gateway checks npm for the newest official version (the higher of the `latest` and `next` channels) every 6 hours. When a newer one exists, a prompt appears in the bottom-right corner of the DSH page; click "Upgrade now" and confirm. It backs up, installs the new version and runs a self-check, rolling back to the previous version automatically if the check fails — about 1–3 minutes in all. "Later" silences that version. From the server you can also run:
+
+```bash
+sudo dsh-vps upgrade            # the version verified by this project
+sudo dsh-vps upgrade --latest   # the latest official release (same as "Upgrade now")
+sudo dsh-vps rollback           # back to the previous version
+```
+
+**Updating the gateway itself** (login page, proxy):
 
 ```bash
 sudo dsh-vps update-gate
 ```
 
-Machines installed with v1.4.1 or earlier that crash on start with `user patch-layer watching requires the Cordis HMR service` got a wrong dependency freeze point (it pulled in cordis releases incompatible with DSH 0.1.5-rc.2). Delete the DSH directory and run the install command again; accounts and data are kept:
-
-```bash
-sudo systemctl stop dsh-gate && sudo rm -rf /opt/dsh-vps/dsh/0.1.5-rc.2
-```
+Machines installed before v1.5.0: run the one-command install above once more to get the in-page upgrade prompt (it enters repair/update mode; accounts and data are kept).
 
 ## Uninstall
 

@@ -108,6 +108,9 @@ log "步骤 2/6：停止并移除 $SERVICE"
 systemctl stop "$SERVICE" 2>/dev/null || true
 systemctl disable "$SERVICE" 2>/dev/null || true
 rm -f "$UNIT_FILE"
+# 浏览器一键升级单元
+systemctl disable --now dsh-vps-upgrade.path 2>/dev/null || true
+rm -f /etc/systemd/system/dsh-vps-upgrade.path /etc/systemd/system/dsh-vps-upgrade.service
 systemctl daemon-reload 2>/dev/null || true
 systemctl reset-failed "$SERVICE" 2>/dev/null || true
 
