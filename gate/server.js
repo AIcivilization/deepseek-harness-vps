@@ -16,6 +16,7 @@
  */
 
 const http = require("node:http");
+const https = require("node:https");
 const net = require("node:net");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -51,6 +52,9 @@ const PLUGIN_OPTIONS = [
 	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题，之后想装什么都在这里装" },
 	{ id: "dsh-vps-manager", pkg: "dsh-vps-manager", name: "VPS 管理 dsh-vps-manager", desc: "在 DSH 里直接管理这台 VPS：不花 token 的查询命令、对话内终端、按风险分级确认的 AI 操作、运维菜谱库" },
 ];
+// pnpm 12 起默认带约 1 天的发布冷却期（minimumReleaseAge），`pnpm add <pkg>` 会装到一天前的旧版。
+// 插件作者修 bug 后用户就该拿到修复，这里关掉冷却期：预装与插件市场安装都取真正的最新版。
+const PLUGIN_ENV = { pnpm_config_minimum_release_age: "0" };
 // 本产品仓库入口：放在 gate 自己的页面（登录 / 初始向导 / 启动等待），
 // 不碰 DSH 原生界面，DSH 升级不受影响。
 const REPO_URL = "https://github.com/AIcivilization/deepseek-harness-vps";
@@ -398,7 +402,7 @@ function spawnDsh() {
 	log(`spawning dsh: node ${args.join(" ")}`);
 	const child = spawn(process.execPath, args, {
 		cwd: GATE_HOME,
-		env: { ...process.env },
+		env: { ...process.env, ...PLUGIN_ENV },
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	dsh.child = child;
@@ -1237,7 +1241,7 @@ function runDshCli(cmdArgs, timeoutMs = 5 * 60_000) {
 	return new Promise((resolve) => {
 		const child = spawn(process.execPath, [DSH_BIN, ...cmdArgs], {
 			cwd: GATE_HOME,
-			env: { ...process.env },
+			env: { ...process.env, ...PLUGIN_ENV },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let stdout = "";
@@ -1257,6 +1261,38 @@ function runDshCli(cmdArgs, timeoutMs = 5 * 60_000) {
 	});
 }
 
+/** 安装时用的 registry：install.sh --mirror cn 记在 config.json 里，与 DSH 本体同源。 */
+function npmRegistry() {
+	try {
+		const cfg = JSON.parse(fs.readFileSync(path.join(STATE_DIR, "config.json"), "utf8"));
+		if (cfg.mirror === "cn") return "https://registry.npmmirror.com";
+	} catch {
+		/* 默认源 */
+	}
+	return "https://registry.npmjs.org";
+}
+
+/** 查询包在 registry 上的 latest 版本；失败返回 null（调用方退回不带版本号安装）。 */
+function latestVersion(pkg) {
+	return new Promise((resolve) => {
+		const url = `${npmRegistry()}/${encodeURIComponent(pkg).replace(/^%40/, "@")}/latest`;
+		const req = https.get(url, { headers: { accept: "application/json" }, timeout: 10_000 }, (res) => {
+			const chunks = [];
+			res.on("data", (c) => chunks.push(c));
+			res.on("end", () => {
+				try {
+					const v = res.statusCode === 200 ? JSON.parse(Buffer.concat(chunks).toString("utf8")).version : null;
+					resolve(typeof v === "string" && /^\d+\.\d+\.\d+(?:-[\w.]+)?$/.test(v) ? v : null);
+				} catch {
+					resolve(null);
+				}
+			});
+		});
+		req.on("timeout", () => req.destroy());
+		req.on("error", () => resolve(null));
+	});
+}
+
 /**
  * 后台安装一批常用插件（不阻塞向导响应）。
  * `dsh plugin` 内部转发给 pnpm；装完置空 token 触发一次 DSH 重启，让新 bundle 进入 profile 生效。
@@ -1264,8 +1300,11 @@ function runDshCli(cmdArgs, timeoutMs = 5 * 60_000) {
 async function installPlugins(options) {
 	let installed = 0;
 	for (const opt of options) {
-		const pkg = opt.pkg;
-		log(`installing plugin: ${pkg}`);
+		// 下限钉在 registry 上的 latest：即使 pnpm 冷却期配置被别处覆盖，也至少装到最新版；
+		// 用 ^ 而非精确版本，profile 里记成范围，之后插件市场的"更新"照常能升级。
+		const version = await latestVersion(opt.pkg);
+		const pkg = version ? `${opt.pkg}@^${version}` : opt.pkg;
+		log(`installing plugin: ${pkg}${version ? "" : "（未查到 latest，交给 pnpm 解析）"}`);
 		// -w 等附加参数由插件作者的安装命令指定，dsh 原样透传给 pnpm
 		const res = await runDshCli(["plugin", "--profile", "web", "add", ...(opt.args || []), pkg]);
 		if (res.code === 0) {
