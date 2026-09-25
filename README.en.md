@@ -12,7 +12,6 @@
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="Runtime dependencies: 0">
   <img src="https://img.shields.io/badge/Docker-not%20required-orange" alt="No Docker required">
   <img src="https://img.shields.io/github/stars/AIcivilization/deepseek-harness-vps?style=social" alt="star">
-  <a href="https://dshget.com/plugins/AIcivilization/deepseek-harness-vps"><img src="https://img.shields.io/badge/Listed_on-DSH_Get-1677ff?style=flat-square" alt="Listed on DSH Get"></a>
 </p>
 
 <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
