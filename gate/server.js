@@ -49,6 +49,7 @@ const CADDY_SITE_FILE = process.env.CADDY_SITE_FILE || "/etc/caddy/dsh-site.conf
 const DEEPSEEK_KEY_REF = "DEEPSEEK_API_KEY"; // DSH 约定：deriveKeyRef("deepseek")
 // /setup 向导可选的常用插件（package 名即 `dsh plugin --profile web add <pkg>` 的入参）
 const PLUGIN_OPTIONS = [
+	{ id: "dsh-vps", pkg: "dsh-vps", name: "VPS 部署 dsh-vps", desc: "本产品的设置页：在「设置 → VPS 部署」里查看 DSH 版本并一键升级、网关状态与服务器常用命令" },
 	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题，之后想装什么都在这里装" },
 	{ id: "dsh-vps-manager", pkg: "dsh-vps-manager", name: "VPS 管理 dsh-vps-manager", desc: "在 DSH 里直接管理这台 VPS：不花 token 的查询命令、对话内终端、按风险分级确认的 AI 操作、运维菜谱库" },
 ];
@@ -102,6 +103,9 @@ const UI_SNIPPET = `<script data-dsh-vps="${UI_MARK}" src="/gate/ui.js" defer></
 // 由 root 的 dsh-vps-upgrade.path/.service 执行升级（gate 自身无权改 /opt/dsh-vps/dsh）。
 const DSH_PACKAGE = "@deepseek-ai/dsh";
 const UPDATE_CHECK_INTERVAL_MS = 6 * 3_600_000;
+// 冷静期：新版本发布满这么久才提示升级。上游多次出现「主包先发、子包几小时后才补齐」
+// （0.1.5-rc.3 缺包约 7 小时；0.2.0-rc.2 发布一小时后仍 ETARGET），刚发布就升级只会装失败。
+const UPGRADE_COOLDOWN_MS = Number(process.env.GATE_UPGRADE_COOLDOWN_HOURS || 12) * 3_600_000;
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 // DSH 的若干特权端点（dsh-market 的 restart / backup 导出 / self-uninstall）要求
@@ -757,6 +761,8 @@ function handleHealth(req, res) {
 				trustedHost: dshTrustedHost,
 				port: DSH_PORT,
 			},
+			// 访问策略：public = 公网凭密码登录；tunnel = 仅 WireGuard 隧道网段可达（dsh-vps vpn）
+			access: readVpnEnv(STATE_DIR).on ? "tunnel" : "public",
 			launchTokenCaptured: dsh.token !== null,
 			dshCookie: cookie
 				? { authority: cookie.authority, expiresAt: cookie.expiresAt, expiresInHours: Math.round((cookie.expiresAt - Date.now()) / 3_600_000) }
@@ -1615,7 +1621,7 @@ async function handleSetup(req, res) {
 
 //#region DSH 版本检测与浏览器一键升级
 
-const update = { latest: null, checkedAt: 0, error: null };
+const update = { latest: null, pending: null, checkedAt: 0, error: null };
 
 function upgradeRequestPath() {
 	return path.join(STATE_DIR, "upgrade.request");
@@ -1653,18 +1659,36 @@ function compareVersions(a, b) {
 	return 0;
 }
 
-/** 官方 latest（正式）与 next（预览）两个渠道中版本号更高的一个；alpha 等内部渠道不取。 */
+/**
+ * 官方 latest（正式）与 next（预览）两个渠道中版本号更高、且已过冷静期的一个；alpha 等内部渠道不取。
+ * 返回 { version, pending }：pending 是更新但仍在冷静期内的版本 { version, availableAt }。
+ */
 function newestDshVersion() {
 	return new Promise((resolve) => {
-		const url = `${npmRegistry()}/-/package/${encodeURIComponent(DSH_PACKAGE).replace(/^%40/, "@")}/dist-tags`;
-		const req = https.get(url, { headers: { accept: "application/json" }, timeout: 10_000 }, (res) => {
+		const url = `${npmRegistry()}/${encodeURIComponent(DSH_PACKAGE).replace(/^%40/, "@")}`;
+		const req = https.get(url, { headers: { accept: "application/json" }, timeout: 20_000 }, (res) => {
 			const chunks = [];
 			res.on("data", (c) => chunks.push(c));
 			res.on("end", () => {
 				try {
-					const tags = res.statusCode === 200 ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
-					const candidates = [tags.latest, tags.next].filter((v) => typeof v === "string" && SEMVER_PATTERN.test(v));
-					resolve(candidates.length ? candidates.sort(compareVersions).pop() : null);
+					if (res.statusCode !== 200) return resolve(null);
+					const doc = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+					const tags = doc["dist-tags"] || {};
+					const times = doc.time || {};
+					const candidates = [...new Set([tags.latest, tags.next])]
+						.filter((v) => typeof v === "string" && SEMVER_PATTERN.test(v))
+						.sort(compareVersions);
+					const now = Date.now();
+					const mature = candidates.filter((v) => {
+						const at = Date.parse(times[v] || "");
+						return Number.isFinite(at) && now - at >= UPGRADE_COOLDOWN_MS;
+					});
+					const version = mature.length ? mature[mature.length - 1] : null;
+					const newest = candidates[candidates.length - 1];
+					const pending = newest && newest !== version
+						? { version: newest, availableAt: Date.parse(times[newest] || "") + UPGRADE_COOLDOWN_MS || null }
+						: null;
+					resolve({ version, pending });
 				} catch {
 					resolve(null);
 				}
@@ -1676,11 +1700,12 @@ function newestDshVersion() {
 }
 
 async function checkDshLatest() {
-	const v = await newestDshVersion();
+	const r = await newestDshVersion();
 	update.checkedAt = Date.now();
-	if (v) {
-		if (v !== update.latest) log(`dsh latest on registry: ${v} (running ${currentDshVersion() || "unknown"})`);
-		update.latest = v;
+	if (r) {
+		if (r.version && r.version !== update.latest) log(`dsh latest on registry: ${r.version} (running ${currentDshVersion() || "unknown"})`);
+		update.latest = r.version;
+		update.pending = r.pending;
 		update.error = null;
 	} else {
 		update.error = "无法查询 npm 最新版本";
@@ -1696,17 +1721,31 @@ function readUpgradeStatus() {
 	}
 }
 
+/** 升级失败时给界面看的日志末尾（state/upgrade.log 由 root 写入并交还 dsh 用户）。 */
+function upgradeLogTail(lines = 15) {
+	try {
+		return fs.readFileSync(path.join(STATE_DIR, "upgrade.log"), "utf8").replace(/\x1b\[[0-9;]*m/g, "").trimEnd().split("\n").slice(-lines).join("\n");
+	} catch {
+		return null;
+	}
+}
+
 function updateInfo() {
 	const current = currentDshVersion();
 	const latest = update.latest;
+	const status = readUpgradeStatus();
 	return {
 		current,
 		latest,
 		available: Boolean(current && latest && compareVersions(latest, current) > 0),
 		checkedAt: update.checkedAt || null,
+		// 更新但仍在冷静期内的版本：界面上告知「X 小时后可升级」，不给升级按钮
+		pending: update.pending && current && compareVersions(update.pending.version, current) > 0 ? update.pending : null,
+		cooldownHours: UPGRADE_COOLDOWN_MS / 3_600_000,
 		error: update.error,
 		requested: fs.existsSync(upgradeRequestPath()),
-		status: readUpgradeStatus(),
+		status,
+		logTail: status && status.state === "failed" ? upgradeLogTail() : null,
 	};
 }
 
@@ -1716,7 +1755,11 @@ async function handleUpdate(req, res, user) {
 		res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
 		res.end(JSON.stringify(body));
 	};
-	if (req.method === "GET") return json(200, updateInfo());
+	if (req.method === "GET") {
+		// 设置页的「检查更新」：立即查一次，而不是等 6 小时一次的定时检查
+		if (/[?&]refresh=1(?:&|$)/.test(req.url || "")) await checkDshLatest();
+		return json(200, updateInfo());
+	}
 	if (req.method !== "POST") return json(405, { error: "method not allowed" });
 	// 触发的是 root 操作：必须是本站页面发起（fetch POST 必带 Origin）
 	const origin = req.headers.origin;

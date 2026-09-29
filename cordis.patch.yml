@@ -1,0 +1,4 @@
+# 把「设置 → VPS 部署」加进当前 profile（界面见 plugin/client.js）
+- insert:
+    - id: dsh-vps
+      name: dsh-vps

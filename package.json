@@ -1,7 +1,7 @@
 {
   "name": "dsh-vps",
-  "version": "1.5.1",
-  "description": "Ship DeepSeek Harness to your own VPS: one command installs a zero-dependency login gateway, automatic HTTPS through Caddy, systemd supervision, and optional WireGuard-only access.",
+  "version": "1.6.0",
+  "description": "Ship DeepSeek Harness to your own VPS: one command installs a zero-dependency login gateway, automatic HTTPS through Caddy, systemd supervision and one-click DSH upgrades; as a DSH plugin it adds Settings → VPS Deploy.",
   "keywords": [
     "deepseek-harness",
     "deepseek",
@@ -31,6 +31,21 @@
     "url": "git+https://github.com/AIcivilization/deepseek-harness-vps.git"
   },
   "bugs": "https://github.com/AIcivilization/deepseek-harness-vps/issues",
+  "main": "./plugin/index.mjs",
+  "exports": {
+    ".": "./plugin/index.mjs",
+    "./client": "./plugin/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
   "bin": {
     "dsh-vps-install": "scripts/bootstrap.mjs"
   },
@@ -46,7 +61,10 @@
     "scripts/bootstrap.mjs",
     "README.md",
     "README.en.md",
-    "LICENSE"
+    "LICENSE",
+    "plugin/index.mjs",
+    "plugin/client.js",
+    "cordis.patch.yml"
   ],
   "engines": {
     "node": ">=22"

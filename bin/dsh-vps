@@ -38,6 +38,8 @@ VERSIONS_URL="${DSHVPS_VERSIONS_URL:-$RAW_BASE/versions.json}"
 DEFAULT_RESOLVE_BEFORE="${DSHVPS_RESOLVE_BEFORE:-2026-09-24T08:20:00Z}"
 VERSIONS_CACHE="$ROOT/state/versions.cache.json"
 NPM_REGISTRY="${DSHVPS_NPM_REGISTRY:-}"
+# 新版本发布满多少小时才升级（--latest / 页面一键升级）：上游常见「主包先发、子包晚几小时补齐」
+UPGRADE_COOLDOWN_HOURS="${DSHVPS_UPGRADE_COOLDOWN_HOURS:-12}"
 # 安装时选了 --mirror cn：升级也走 npmmirror，与首次安装同源
 if [[ -z "$NPM_REGISTRY" && -f "$ROOT/state/config.json" ]] && grep -q '"mirror": *"cn"' "$ROOT/state/config.json"; then
 	NPM_REGISTRY="https://registry.npmmirror.com"
@@ -241,13 +243,17 @@ cmd_upgrade() {
 	local resolve_before="$DEFAULT_RESOLVE_BEFORE"
 
 	if [[ $latest_mode -eq 1 ]]; then
-		warn "--latest：将安装官方最新版（npm latest 与 next 渠道中较新的一个），可能未经 dsh-vps 验证（有备份与自动回滚兜底）"
+		warn "--latest：将安装官方最新版（npm latest 与 next 渠道中较新、且发布满 ${UPGRADE_COOLDOWN_HOURS} 小时的一个），可能未经 dsh-vps 验证（有备份与自动回滚兜底）"
 		[[ $assume_yes -eq 1 ]] || { read -rp "确认继续？[y/N] " ans; [[ "$ans" == "y" || "$ans" == "Y" ]] || die "已取消"; }
-		local reg_arg=(dist-tags --json)
+		local reg_arg=(dist-tags time --json)
 		[[ -n "$NPM_REGISTRY" ]] && reg_arg+=(--registry="$NPM_REGISTRY")
-		# 官方同时维护 latest（正式）与 next（预览）两个渠道，取其中版本号更高的；alpha 等内部渠道不取
-		target=$(npm view @deepseek-ai/dsh "${reg_arg[@]}" 2>/dev/null | node -e '
-const t = JSON.parse(require("fs").readFileSync(0, "utf8"));
+		# 官方同时维护 latest（正式）与 next（预览）两个渠道，取其中版本号更高、且过了冷静期的；
+		# alpha 等内部渠道不取。冷静期见 UPGRADE_COOLDOWN_HOURS（与 gate 的升级提示同一规则）
+		target=$(npm view @deepseek-ai/dsh "${reg_arg[@]}" 2>/dev/null | COOLDOWN_H="$UPGRADE_COOLDOWN_HOURS" node -e '
+const doc = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const t = doc["dist-tags"] || {};
+const times = doc.time || {};
+const cooldown = Number(process.env.COOLDOWN_H || 12) * 3600000;
 const parse = (v) => { const [c, p] = v.split("-", 2); return { c: c.split(".").map(Number), p: p === undefined ? null : p.split(".") }; };
 const cmp = (a, b) => {
 	const x = parse(a), y = parse(b);
@@ -263,7 +269,8 @@ const cmp = (a, b) => {
 	}
 	return 0;
 };
-const c = [t.latest, t.next].filter((v) => typeof v === "string" && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v));
+const c = [t.latest, t.next].filter((v) => typeof v === "string" && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v))
+	.filter((v) => { const at = Date.parse(times[v] || ""); return Number.isFinite(at) && Date.now() - at >= cooldown; });
 if (!c.length) process.exit(1);
 console.log(c.sort(cmp).pop());
 ') || die "无法查询 npm 最新版本"

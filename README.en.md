@@ -127,7 +127,7 @@ If the final self-check reports that DSH is not ready yet, the setup link is sti
 
 ## Update
 
-**DSH itself follows official releases.** The gateway checks npm for the newest official version (the higher of the `latest` and `next` channels) every 6 hours. When a newer one exists, a prompt appears in the bottom-right corner of the DSH page; click "Upgrade now" and confirm. It backs up, installs the new version and runs a self-check, rolling back to the previous version automatically if the check fails — about 1–3 minutes in all. "Later" silences that version. From the server you can also run:
+**DSH itself follows official releases.** The gateway checks npm for the newest official version (the higher of the `latest` and `next` channels) every 6 hours. When a newer one exists, a prompt appears in the bottom-right corner of the DSH page (also available under Settings → VPS Deploy); click "Upgrade now" and confirm. It backs up, installs the new version and runs a self-check, rolling back to the previous version automatically if the check fails — about 1–3 minutes in all. "Later" silences that version. A release is offered only 12 hours after it is published — upstream sometimes publishes the main package hours before its sub-packages, and upgrading in that window just fails. From the server you can also run:
 
 ```bash
 sudo dsh-vps upgrade            # the version verified by this project
@@ -164,7 +164,9 @@ sudo dsh-vps setup-url
 
 Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
 
-The checked plugins install in the background (tens of seconds), always at their latest npm version, and DSH restarts to activate them. Two of them:
+The checked plugins install in the background (tens of seconds), always at their latest npm version, and DSH restarts to activate them. Three of them:
+
+- **dsh-vps** (this project): adds **Settings → VPS Deploy** to DSH — the current and latest official DSH version with one-click upgrade (automatic rollback on failure), gateway status and access mode, and common server commands. Installed in any other DSH, the page shows the one-command setup for deploying DSH to your own VPS
 
 - **dsh-market**: browse, search and install community plugins and themes from Settings. Everything else is left to you — add whatever you want from the marketplace afterwards
 - **dsh-vps-manager**: manage this very VPS from inside DSH — `/vps-` queries that skip the model and cost no tokens, a terminal in the conversation, AI operations confirmed by risk level, and a recipe library. Add this machine under Settings → VPS Manager (SSH key login)

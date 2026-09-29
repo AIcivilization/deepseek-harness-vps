@@ -1,0 +1,395 @@
+/* global window, document, fetch, navigator, setTimeout, clearTimeout, setInterval, clearInterval */
+// plugin/client.js — 设置 → VPS 部署
+//
+// 手写单文件 bundle，没有构建链：供 DSH web 客户端的 ModuleLoader 注入。
+// 只挂一处：settings.section。
+//
+// 两种状态，由同源的 /gate/update 能否返回网关数据来判断：
+//   - 这个 DSH 是 dsh-vps 部署的（前面有 dsh-gate）：DSH 版本与一键升级、网关状态、服务器常用命令
+//   - 普通 DSH：把 DSH 部署到自己 VPS 的一键命令
+//
+// 升级请求由网关校验登录与同源后写入请求文件，真正执行的是服务器上 root 的
+// dsh-vps-upgrade 服务（备份 → 安装 → 自检 → 失败自动回滚）；页面只负责发起与展示。
+//
+// 硬约束：界面出错不能影响 DSH 本身，注册一律包在 try/catch 里。
+
+window.__ModuleLoader__.load({
+  id: 'dsh-vps',
+  factory: (require) => {
+    const module = { exports: {} }
+    const React = require('react')
+    const { useCallback, useEffect, useRef, useState } = React
+    const h = React.createElement
+
+    const REPO = 'https://github.com/AIcivilization/deepseek-harness-vps'
+    const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s'
+
+    // ——————————————————————— 文案 ———————————————————————
+
+    // DSH 页面的 <html lang> 恒为 en，不能用来判断；按浏览器语言走
+    const zh = (() => {
+      try {
+        return /^zh/i.test(navigator.language || '')
+      } catch {
+        return true
+      }
+    })()
+    const t = (cn, en) => (zh ? cn : en)
+
+    // ——————————————————————— 样式（跟随 DSH 主题变量） ———————————————————————
+
+    const T = {
+      border: 'var(--border, var(--dsw-alias-border-l1, rgba(127,127,127,0.25)))',
+      layer: 'var(--dsw-alias-bg-layer-1, rgba(127,127,127,0.10))',
+      danger: 'var(--dsw-alias-state-error-primary, #e5534b)',
+      ok: 'var(--dsw-alias-state-success-primary, #2ea043)',
+      accent: 'var(--primary, #3b82f6)',
+    }
+    const line = `1px solid ${T.border}`
+    const S = {
+      root: { fontSize: 13, lineHeight: 1.6 },
+      h2: { fontSize: 14, fontWeight: 600, margin: '0 0 8px' },
+      card: { border: line, borderRadius: 8, padding: 12, marginBottom: 10 },
+      spread: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
+      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+      kv: { display: 'grid', gridTemplateColumns: 'max-content 1fr', columnGap: 16, rowGap: 4 },
+      muted: { opacity: 0.6 },
+      pre: {
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 12,
+        background: T.layer,
+        borderRadius: 6,
+        padding: '8px 10px',
+        overflowX: 'auto',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+        margin: 0,
+      },
+      code: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 },
+      btn: (kind, disabled) => ({
+        border: kind === 'primary' ? `1px solid ${T.accent}` : line,
+        background: kind === 'primary' ? T.accent : 'transparent',
+        color: kind === 'primary' ? 'var(--primary-foreground, #fff)' : 'inherit',
+        borderRadius: 6,
+        padding: '4px 12px',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        fontSize: 13,
+        whiteSpace: 'nowrap',
+      }),
+      badge: (tone) => ({
+        fontSize: 11,
+        padding: '1px 7px',
+        borderRadius: 10,
+        border: line,
+        color: tone === 'danger' ? T.danger : tone === 'ok' ? T.ok : tone === 'accent' ? T.accent : 'inherit',
+        whiteSpace: 'nowrap',
+      }),
+      err: { border: `1px solid ${T.danger}`, color: T.danger, borderRadius: 6, padding: '8px 10px', marginTop: 8 },
+      note: { border: line, borderRadius: 6, padding: '8px 10px', marginTop: 8, background: T.layer },
+    }
+
+    // ——————————————————————— 与网关通信 ———————————————————————
+
+    /** GET 网关接口；不是网关（普通 DSH 返回 404 或前端页面）时返回 null */
+    async function gateGet(path) {
+      try {
+        const res = await fetch(path, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(20_000) })
+        if (!res.ok || !String(res.headers.get('content-type') || '').includes('application/json')) return null
+        return await res.json()
+      } catch {
+        return null
+      }
+    }
+
+    async function requestUpgrade() {
+      const res = await fetch('/gate/update', { method: 'POST', credentials: 'same-origin', signal: AbortSignal.timeout(30_000) })
+      let body = {}
+      try {
+        body = await res.json()
+      } catch {
+        // 非 JSON：用状态码说话
+      }
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`)
+      return body
+    }
+
+    // ——————————————————————— 小工具 ———————————————————————
+
+    function ago(ms) {
+      if (!ms) return t('尚未检查', 'not checked yet')
+      const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+      if (s < 60) return t('刚刚', 'just now')
+      if (s < 3600) return t(`${Math.round(s / 60)} 分钟前`, `${Math.round(s / 60)} min ago`)
+      if (s < 86400) return t(`${Math.round(s / 3600)} 小时前`, `${Math.round(s / 3600)} h ago`)
+      return t(`${Math.round(s / 86400)} 天前`, `${Math.round(s / 86400)} d ago`)
+    }
+
+    function duration(sec) {
+      if (sec < 3600) return t(`${Math.max(1, Math.round(sec / 60))} 分钟`, `${Math.max(1, Math.round(sec / 60))} min`)
+      if (sec < 86400) return t(`${Math.round(sec / 3600)} 小时`, `${Math.round(sec / 3600)} h`)
+      return t(`${Math.round(sec / 86400)} 天`, `${Math.round(sec / 86400)} d`)
+    }
+
+    async function copyText(text) {
+      try {
+        await navigator.clipboard.writeText(text)
+        return true
+      } catch {
+        // 非安全上下文拿不到 clipboard：退回 execCommand
+        try {
+          const ta = document.createElement('textarea')
+          ta.value = text
+          ta.style.position = 'fixed'
+          ta.style.opacity = '0'
+          document.body.appendChild(ta)
+          ta.select()
+          const ok = document.execCommand('copy')
+          ta.remove()
+          return ok
+        } catch {
+          return false
+        }
+      }
+    }
+
+    function CopyLine({ text, note }) {
+      const [copied, setCopied] = useState(false)
+      return h('div', { style: { marginTop: 6 } },
+        h('div', { style: { ...S.row, flexWrap: 'nowrap', alignItems: 'stretch' } },
+          h('pre', { style: { ...S.pre, flex: 1 } }, text),
+          h('button', {
+            type: 'button',
+            style: S.btn(),
+            onClick: async () => {
+              setCopied(await copyText(text))
+              setTimeout(() => setCopied(false), 1500)
+            },
+          }, copied ? t('已复制', 'Copied') : t('复制', 'Copy'))),
+        note ? h('div', { style: { ...S.muted, fontSize: 12, marginTop: 2 } }, note) : null)
+    }
+
+    // ——————————————————————— 部署在 dsh-vps 上 ———————————————————————
+
+    function VersionCard({ info, reload }) {
+      const [busy, setBusy] = useState(false)
+      const [error, setError] = useState(null)
+      const [upgrading, setUpgrading] = useState(false)
+      const [checking, setChecking] = useState(false)
+      const startedAt = useRef(0)
+      const timer = useRef(null)
+
+      const st = info.status
+      const running = info.requested || (st && st.state === 'running')
+
+      const poll = useCallback(() => {
+        clearInterval(timer.current)
+        timer.current = setInterval(async () => {
+          const next = await gateGet('/gate/update')
+          if (!next) return // 升级中网关会重启一次，连不上属正常，继续等
+          reload(next)
+          const s = next.status
+          if (!next.requested && s && s.state !== 'running' && s.at >= startedAt.current) {
+            clearInterval(timer.current)
+            setUpgrading(false)
+            if (s.state === 'success') setTimeout(() => window.location.reload(), 1500)
+          }
+        }, 3000)
+      }, [reload])
+
+      useEffect(() => {
+        if (running) {
+          startedAt.current = startedAt.current || Date.now() - 60_000
+          setUpgrading(true)
+          poll()
+        }
+        return () => clearInterval(timer.current)
+      }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+      async function upgrade() {
+        const msg = t(
+          `升级 DeepSeek Harness 到 ${info.latest}？\n\n升级期间 DSH 会重启，约 1–3 分钟不可用。升级前自动备份；新版本自检不通过会自动回滚到当前版本。`,
+          `Upgrade DeepSeek Harness to ${info.latest}?\n\nDSH restarts during the upgrade and is unavailable for about 1–3 minutes. A backup is taken first; if the new version fails its self-check, it rolls back automatically.`,
+        )
+        if (!window.confirm(msg)) return
+        setBusy(true)
+        setError(null)
+        try {
+          startedAt.current = Date.now() - 5_000
+          await requestUpgrade()
+          setUpgrading(true)
+          poll()
+        } catch (e) {
+          setError(String(e.message || e))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      async function check() {
+        setChecking(true)
+        const next = await gateGet('/gate/update?refresh=1')
+        if (next) reload(next)
+        setChecking(false)
+      }
+
+      const finished = !upgrading && st && st.state !== 'running' && Date.now() - st.at < 24 * 3600_000
+      return h('div', { style: S.card },
+        h('div', { style: S.spread },
+          h('div', { style: S.h2 }, 'DeepSeek Harness'),
+          info.available
+            ? h('span', { style: S.badge('accent') }, t('有新版本', 'Update available'))
+            : info.latest ? h('span', { style: S.badge('ok') }, t('已是最新', 'Up to date')) : null),
+        h('div', { style: S.kv },
+          h('span', { style: S.muted }, t('当前版本', 'Current')), h('span', { style: S.code }, info.current || '—'),
+          h('span', { style: S.muted }, t('官方最新', 'Latest')),
+          h('span', null, h('span', { style: S.code }, info.latest || '—'),
+            h('span', { style: { ...S.muted, marginLeft: 8, fontSize: 12 } }, t(`检查于 ${ago(info.checkedAt)}`, `checked ${ago(info.checkedAt)}`)))),
+        h('div', { style: { ...S.muted, fontSize: 12, marginTop: 4 } },
+          t(`跟随官方发布：npm 上 latest（正式）与 next（预览）两个渠道中版本号较高的一个；新版本发布满 ${info.cooldownHours ?? 12} 小时后才提供升级，避开上游刚发布时的缺包。`,
+            `Follows official releases: the higher of the npm \`latest\` (stable) and \`next\` (preview) channels, offered ${info.cooldownHours ?? 12} hours after release so upstream has time to finish publishing.`)),
+        info.pending
+          ? h('div', { style: S.note }, t(
+            `${info.pending.version} 刚发布不久，${info.pending.availableAt ? `约 ${Math.max(1, Math.ceil((info.pending.availableAt - Date.now()) / 3600_000))} 小时后` : '稍后'}可以升级。`,
+            `${info.pending.version} was released recently; it can be installed ${info.pending.availableAt ? `in about ${Math.max(1, Math.ceil((info.pending.availableAt - Date.now()) / 3600_000))} h` : 'later'}.`))
+          : null,
+        upgrading
+          ? h('div', { style: S.note }, t(
+            `正在升级${info.latest ? ` 到 ${info.latest}` : ''}…（约 1–3 分钟，期间页面会短暂不可用，完成后自动刷新）`,
+            `Upgrading${info.latest ? ` to ${info.latest}` : ''}… (about 1–3 minutes; the page is briefly unavailable and reloads when done)`))
+          : h('div', { style: { ...S.row, marginTop: 10 } },
+            h('button', { type: 'button', style: S.btn(null, checking), disabled: checking, onClick: check },
+              checking ? t('检查中…', 'Checking…') : t('检查更新', 'Check for updates')),
+            info.available
+              ? h('button', { type: 'button', style: S.btn('primary', busy), disabled: busy, onClick: upgrade },
+                t(`升级到 ${info.latest}`, `Upgrade to ${info.latest}`))
+              : null),
+        error ? h('div', { style: S.err }, t(`无法开始升级：${error}`, `Could not start the upgrade: ${error}`)) : null,
+        finished && st.state === 'success'
+          ? h('div', { style: S.note }, t(`最近一次升级成功：${st.from} → ${st.to}（${ago(st.at)}）`, `Last upgrade succeeded: ${st.from} → ${st.to} (${ago(st.at)})`))
+          : null,
+        finished && st.state === 'failed'
+          ? h('div', { style: S.err },
+            h('div', null, t(`最近一次升级未成功（${ago(st.at)}），已保持在 ${st.to || st.from}，可以正常使用。`,
+              `The last upgrade did not succeed (${ago(st.at)}); DSH stayed on ${st.to || st.from} and works normally.`)),
+            info.logTail ? h('pre', { style: { ...S.pre, marginTop: 6, color: 'inherit' } }, info.logTail) : null)
+          : null)
+    }
+
+    function GatewayCard({ health }) {
+      if (!health) {
+        return h('div', { style: S.card },
+          h('div', { style: S.h2 }, t('网关', 'Gateway')),
+          h('div', { style: S.muted }, t('读取网关状态失败，稍后刷新再试。', 'Could not read gateway status; refresh later.')))
+      }
+      const d = health.dsh || {}
+      const cookie = health.dshCookie
+      const tunnel = health.access === 'tunnel'
+      return h('div', { style: S.card },
+        h('div', { style: S.spread },
+          h('div', { style: S.h2 }, t('网关', 'Gateway')),
+          h('span', { style: S.badge(d.alive ? 'ok' : 'danger') }, d.alive ? t('运行正常', 'Healthy') : t('DSH 未运行', 'DSH not running'))),
+        h('div', { style: S.kv },
+          h('span', { style: S.muted }, t('访问地址', 'Address')), h('span', { style: S.code }, d.trustedHost ? `https://${d.trustedHost}` : '—'),
+          h('span', { style: S.muted }, t('访问方式', 'Access')),
+          h('span', null, tunnel
+            ? t('仅 WireGuard 隧道内的设备可访问', 'WireGuard tunnel devices only')
+            : t('公网可访问，凭管理员账号登录', 'Public, behind the admin login')),
+          h('span', { style: S.muted }, t('网关已运行', 'Gateway uptime')), h('span', null, duration(health.uptimeSec || 0)),
+          h('span', { style: S.muted }, t('DSH 重启次数', 'DSH restarts')), h('span', null, String(d.restarts ?? 0)),
+          h('span', { style: S.muted }, t('DSH 会话', 'DSH session')),
+          h('span', null, cookie
+            ? t(`有效，剩余约 ${Math.max(0, Math.round(cookie.expiresInHours / 24))} 天（到期前自动续期）`,
+              `valid, about ${Math.max(0, Math.round(cookie.expiresInHours / 24))} days left (renewed automatically)`)
+            : t('尚未就绪', 'not ready'))),
+        health.lastError ? h('div', { style: S.err }, health.lastError) : null)
+    }
+
+    function CommandsCard() {
+      const rows = [
+        ['sudo dsh-vps status', t('服务状态、版本、健康检查', 'services, versions and health')],
+        ['sudo dsh-vps backup', t('备份 DSH 数据与网关配置（保留最近 3 份）', 'back up DSH data and gateway config (keeps the last 3)')],
+        ['sudo dsh-vps rollback', t('切回上一个 DSH 版本', 'switch back to the previous DSH version')],
+        ['sudo dsh-vps vpn setup <设备名>'.replace('<设备名>', t('<设备名>', '<device>')), t('改为仅 WireGuard 隧道可访问', 'restrict access to a WireGuard tunnel')],
+        ['sudo dsh-vps update-gate', t('更新网关（登录页、代理）自身', 'update the gateway itself (login page, proxy)')],
+        ['sudo dsh-vps reset-admin', t('忘记管理员密码时重置', 'reset a forgotten admin password')],
+      ]
+      return h('div', { style: S.card },
+        h('div', { style: S.h2 }, t('服务器上的常用命令', 'Server commands')),
+        h('div', { style: { ...S.muted, fontSize: 12 } }, t('SSH 登录服务器后执行。', 'Run these over SSH on the server.')),
+        rows.map(([cmd, note]) => h(CopyLine, { key: cmd, text: cmd, note })))
+    }
+
+    // ——————————————————————— 普通 DSH：部署引导 ———————————————————————
+
+    function DeployGuide() {
+      return h('div', { style: S.card },
+        h('div', { style: S.h2 }, t('把 DeepSeek Harness 部署到你的 VPS', 'Deploy DeepSeek Harness to your VPS')),
+        h('div', null, t(
+          '这个 DSH 不是通过 dsh-vps 部署的。在一台 Ubuntu 22.04+ / Debian 12+ 的 VPS 上执行下面的命令，就能装好带登录页、自动 HTTPS 的原版 DSH，之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在这一页一键升级。',
+          'This DSH was not deployed with dsh-vps. Run the command below on an Ubuntu 22.04+ / Debian 12+ VPS to install stock DSH behind a login page with automatic HTTPS, reachable from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click on this page.')),
+        h(CopyLine, { text: INSTALL_CMD }),
+        h('ul', { style: { margin: '8px 0 0', paddingLeft: 18 } },
+          h('li', null, t('有域名（A 记录已解析到服务器）：在末尾加 ', 'With a domain pointed at the server: append '),
+            h('span', { style: S.code }, '-- --domain dsh.example.com'), t('，自动签发证书。', ' for an automatic certificate.')),
+          h('li', null, t('国内网络：再加 ', 'Behind the GFW: also add '), h('span', { style: S.code }, '--mirror cn'), t('。', '.')),
+          h('li', null, t('需要 root 权限，并开放 80/443 端口。安装结束时会打印带一次性令牌的设置链接，打开它创建管理员账号。',
+            'Needs root and open ports 80/443. It prints a setup link with a one-time token at the end; open it to create the admin account.')),
+          h('li', null, t('装了 dsh-vps-manager 的话，可以直接让对话里的 AI 在服务器上执行这条命令。',
+            'With dsh-vps-manager installed, you can ask the AI in the conversation to run this on the server.'))),
+        h('div', { style: { marginTop: 8 } },
+          h('a', { href: REPO, target: '_blank', rel: 'noreferrer', style: { color: T.accent } }, t('完整说明（GitHub）', 'Full guide (GitHub)'))))
+    }
+
+    // ——————————————————————— 设置页 ———————————————————————
+
+    function SettingsSection() {
+      const [mode, setMode] = useState('loading')
+      const [info, setInfo] = useState(null)
+      const [health, setHealth] = useState(null)
+
+      useEffect(() => {
+        let alive = true
+        ;(async () => {
+          const u = await gateGet('/gate/update')
+          if (!alive) return
+          if (!u || !('current' in u)) {
+            setMode('standalone')
+            return
+          }
+          setInfo(u)
+          setMode('deployed')
+          const hh = await gateGet('/gate/health')
+          if (alive) setHealth(hh)
+        })()
+        return () => {
+          alive = false
+        }
+      }, [])
+
+      if (mode === 'loading') return h('div', { style: { ...S.root, ...S.muted } }, t('读取中…', 'Loading…'))
+      if (mode === 'standalone') return h('div', { style: S.root }, h(DeployGuide))
+      return h('div', { style: S.root },
+        h(VersionCard, { info, reload: setInfo }),
+        h(GatewayCard, { health }),
+        h(CommandsCard))
+    }
+
+    // ——————————————————————— 注册 ———————————————————————
+
+    const name = 'dsh-vps-client'
+    const inject = ['slots']
+
+    function apply(ctx) {
+      try {
+        ctx.slots.inject('settings.section', () =>
+          ctx.slots.register({ name: 'settings.section', id: 'dsh-vps', order: 35, label: () => t('VPS 部署', 'VPS Deploy') }, SettingsSection))
+      } catch (error) {
+        console.warn('[dsh-vps] 设置页注册失败', error)
+      }
+    }
+
+    module.exports = { name, inject, apply, __test: { ago, duration, gateGet } }
+    return module.exports
+  },
+})
