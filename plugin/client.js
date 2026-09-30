@@ -506,10 +506,10 @@ window.__ModuleLoader__.load({
 
     function DeployGuide() {
       return h('div', { style: S.card },
-        h('div', { style: S.h2 }, t('把 DeepSeek Harness 部署到你的 VPS', 'Deploy DeepSeek Harness to your VPS')),
+        h('div', { style: S.h2 }, t('把 DeepSeek Harness 装到你的 VPS', 'Install DeepSeek Harness on your VPS')),
         h('div', { style: { marginBottom: 12 } }, t(
-          '这个 DSH 不是通过 dsh-vps 部署的。填好一台 Ubuntu 22.04+ / Debian 12+ 服务器的登录信息，就能在上面装好带登录页、自动 HTTPS 的原版 DSH，之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在设置里一键升级。',
-          'This DSH was not deployed with dsh-vps. Enter the login details of an Ubuntu 22.04+ / Debian 12+ server to install stock DSH there behind a login page with automatic HTTPS, reachable from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click in Settings.')),
+          '填好一台 Ubuntu 22.04+ / Debian 12+ 服务器的登录信息，点「安装到这台 VPS」，就会在上面装好带登录页、自动 HTTPS 的原版 DSH。之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在那边的「设置 → VPS 部署」里一键升级。',
+          'Enter the login details of an Ubuntu 22.04+ / Debian 12+ server and click "Install on this VPS" to set up stock DSH there behind a login page with automatic HTTPS. Then use it from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click under Settings → VPS Deploy over there.')),
         h(DeployForm),
         h('div', { style: { marginTop: 10 } },
           h('a', { href: REPO, target: '_blank', rel: 'noreferrer', style: { color: T.accent } }, t('完整说明（GitHub）', 'Full guide (GitHub)'))))

@@ -20,7 +20,11 @@
 
 ---
 
-> **This is a VPS deployment tool for DSH, not a plugin you install inside DSH. Run the one-command install below on your VPS and it sets up DSH itself, complete with a login page.**
+> **A VPS deployment tool for DSH: it puts stock DSH, behind a login page, on your own VPS so you can use it from any browser.** Pick either way to install:
+
+**① From a form in the DSH on your own computer**: install the `dsh-vps` plugin from the plugin market (or run `dsh plugin add dsh-vps`), open **Settings → VPS Deploy**, enter the server IP, SSH port, username and password (plus a domain if you have one), and click "Install on this VPS".
+
+**② With one command on the VPS**:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
@@ -42,16 +46,16 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 | Capability | Notes |
 | --- | --- |
-| One-command install | `curl \| bash`, then it runs as a systemd service, started on boot |
+| Two ways to install | fill in a form and click install from the DSH on your own computer (Mac / Windows / Linux), or run one `curl \| bash` on the VPS; then it runs as a systemd service, started on boot |
 | Login gate | scrypt password + HMAC session cookie + rate limiting |
 | Browser setup wizard | admin account, domain, DeepSeek API key and bundled plugins — all filled in from the browser |
 | One-time setup token | the wizard only answers to holders of the token; the link is printed at install time, re-printable, and voided once setup completes |
-| One-click bundled plugins | 2 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart |
+| One-click bundled plugins | 3 shipped in the wizard (including this project's Settings → VPS Deploy page), pre-checked and uncheckable, installed in the background and activated by an automatic restart |
 | Automatic HTTPS | Caddy issues and renews certificates; changing the domain in the wizard hot-reloads instantly |
 | Native settings on a public domain | settings, models, API keys and permission policies read and write normally |
 | Working plugin marketplace | browse and install plugins from the marketplace, and "restart now" just works |
 | Self-healing startup | the first boot and plugin installs take tens of seconds; the page waits and enters on its own |
-| Safe upgrades | DSH is pinned to a verified version list; upgrades go backup → self-check → automatic rollback on failure, plus manual rollback at any time |
+| One-click upgrades that follow upstream | a prompt appears when DSH releases a new version; upgrade with one click under Settings → VPS Deploy — backup → self-check → automatic rollback on failure, plus manual rollback at any time |
 | Observable and recoverable | `/gate/health` on the server reports the crash reason and crash streak; `dsh-vps backup` keeps the latest 3 copies |
 | Tightened exposure | session cookies are always Secure/HttpOnly/SameSite; diagnostics are reachable only from the server itself or an authenticated session; the service runs as the unprivileged `dsh` user under systemd sandboxing |
 | Reachable by me only | one command builds a WireGuard tunnel, after which the public internet can't even reach the login page; SSH local forwarding covers you if you'd rather install nothing |
@@ -95,6 +99,21 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 ## Install
 
+### Option 1: fill in a form in the DSH on your own computer
+
+Works with DSH on Mac, Windows and Linux:
+
+1. Add the `dsh-vps` plugin to DSH: search the plugin market, or run `dsh plugin add dsh-vps`
+2. Open **Settings → VPS Deploy** and enter the server IP, SSH port, username and password; add a domain if its A record already points at the server, and tick "Server is in mainland China" if it is
+3. Click "Install on this VPS"
+
+- The password is used once and never stored; leave it empty to use your existing SSH key
+- The page streams the install log and ends with the setup-wizard link
+- The install runs in the background on the server, so closing the page or losing the connection does not stop it
+- Needs an OpenSSH client on your computer: built into macOS and Linux; on Windows 10/11 add "OpenSSH Client" under Settings → System → Optional features
+
+### Option 2: run one command on the VPS
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com
@@ -108,9 +127,7 @@ No domain yet? Drop `--domain` and use the public IP:
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
 ```
 
-The certificate then comes from Caddy's internal CA, so the browser warns "Not secure / certificate not trusted". That is expected — proceed anyway. Add a domain in the wizard later and Caddy switches to a real certificate.
-
-**Install from a form in your own DSH** (DSH on Mac, Windows or Linux): add the `dsh-vps` plugin (search the plugin market, or `dsh plugin add dsh-vps`), open **Settings → VPS Deploy**, enter the server IP, SSH port, username and password (used once, never stored; leave it empty to use your existing SSH key), plus a domain if you have one, and click "Install on this VPS". The page streams the install log and ends with the setup-wizard link. The install runs in the background on the server, so closing the page or losing the connection does not stop it. Needs an OpenSSH client on your computer (built into macOS and Linux; on Windows 10/11 add "OpenSSH Client" under Settings → System → Optional features).
+The certificate then comes from Caddy's internal CA, so the browser warns "Not secure / certificate not trusted". That is expected — proceed anyway. Add a domain in the wizard later and Caddy switches to a real certificate. (The same applies to option 1 without a domain.)
 
 Or install through npm, running exactly the scripts shipped in this package (pinned, no network fetch; needs Node 22+ on the machine):
 
@@ -121,8 +138,8 @@ npx dsh-vps-install install --domain dsh.example.com
 To pin a release instead of `main`, replace `main` with the version tag and point later gateway fetches at the same tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3/install.sh \
-  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3 bash -s -- --domain dsh.example.com
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0/install.sh \
+  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0 bash -s -- --domain dsh.example.com
 ```
 
 If the final self-check reports that DSH is not ready yet, the setup link is still printed; the page shows startup progress and the actual error. Troubleshoot with `journalctl -u dsh-gate -n 80 --no-pager`.
@@ -158,7 +175,7 @@ Removes the service, install directory, Caddy site block and the DSH data direct
 
 ## First run
 
-Installation prints a **setup link carrying a one-time token** — open it to reach the wizard (opening the bare IP or domain only shows a "setup token required" page, by design): admin username/password → (optional) domain, DeepSeek API key & bundled plugins → log in. The wizard only answers to holders of the token, and the token is voided once setup completes. Lost the link? Print it again:
+Installation ends with a **setup link carrying a one-time token** (printed in the terminal for the command-line install, shown on the settings page for the form install) — open it to reach the wizard (opening the bare IP or domain only shows a "setup token required" page, by design): admin username/password → (optional) domain, DeepSeek API key & bundled plugins → log in. The wizard only answers to holders of the token, and the token is voided once setup completes. Lost the link? Print it again:
 
 ```bash
 sudo dsh-vps setup-url
@@ -255,6 +272,7 @@ Both DSH and the gateway bind to 127.0.0.1 only, the user's browser never sees D
 | `caddy/Caddyfile.template` | Caddy main config |
 | `units/dsh-gate.service` | systemd unit template |
 | `versions.json` | verified DSH version list |
+| `plugin/` + `cordis.patch.yml` | the DSH plugin: Settings → VPS Deploy (version and one-click upgrade, gateway status; or install to a VPS over SSH from a form) |
 
 ---
 

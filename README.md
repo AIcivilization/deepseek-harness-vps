@@ -21,7 +21,11 @@
 
 ---
 
-> **这是 DSH 的 VPS 部署工具，不是在 DSH 里安装的插件，在 VPS 上执行下面的一键安装命令，它会装好带登录界面的 DSH 本身。**
+> **这是 DSH 的 VPS 部署工具：把带登录界面的原版 DSH 装到你自己的 VPS 上，之后在任何地方用浏览器访问。** 两种装法任选其一：
+
+**① 在自己电脑上的 DSH 里填表安装**：插件市场搜索 `dsh-vps` 安装（或执行 `dsh plugin add dsh-vps`），打开「设置 → VPS 部署」，填服务器 IP、SSH 端口、用户名、密码（有域名再填域名），点「安装到这台 VPS」。
+
+**② 在 VPS 上执行一键安装命令**：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
@@ -47,16 +51,16 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 | 能力 | 说明 |
 | --- | --- |
-| 一键安装 | `curl \| bash`，装完即 systemd 托管、开机自启 |
+| 两种装法 | 在自己电脑上的 DSH 里填表、点一下安装（Mac / Windows / Linux）；或在 VPS 上执行一条 `curl \| bash`。装完即 systemd 托管、开机自启 |
 | 登录门 | scrypt 口令 + HMAC 会话 Cookie + 登录限流 |
 | 浏览器初始向导 | 管理员账号、域名、DeepSeek API Key、预置插件，全程在浏览器里填完 |
 | 一次性启动令牌 | 向导只对持有令牌的人开放，链接随安装输出，`dsh-vps setup-url` 可重取，设置完成即作废 |
-| 预置插件一键装 | 向导内置 2 款，默认全选、可取消，后台装完自动重启生效 |
+| 预置插件一键装 | 向导内置 3 款（含本产品的「设置 → VPS 部署」页），默认全选、可取消，后台装完自动重启生效 |
 | 自动 HTTPS | Caddy 自动签发并续期证书；向导里改域名即时热加载 |
 | 公网可用的原生设置页 | 设置、模型、API Key、权限策略在公网域名下照常读写 |
 | 插件市场可用 | 市场里浏览/安装插件，点「立即重启」直接生效 |
 | 会话自愈 | DSH 首启与插件安装需要几十秒，页面自动等待，就绪后自动进入 |
-| 安全升级 | DSH 版本钉在已验证清单内，升级走备份 → 自检 → 失败自动回滚，也可随时手动回滚 |
+| 跟随官方一键升级 | DSH 出新版本时页面提示，在「设置 → VPS 部署」里点一下升级；升级走备份 → 自检 → 失败自动回滚，也可随时手动回滚 |
 | 可观测与可恢复 | 本机 `/gate/health` 直接给出崩溃原因与连续崩溃次数；`dsh-vps backup` 保留最近 3 份 |
 | 收紧的暴露面 | 会话 Cookie 恒为 Secure/HttpOnly/SameSite；诊断接口只对服务器本机与已登录会话开放；服务以无特权的 dsh 用户运行并受 systemd 沙箱约束 |
 | 仅我可访问 | 一条命令建 WireGuard 隧道，之后公网访问不到登录页，只有隧道内的设备能进；不想装东西也可用 SSH 本地转发 |
@@ -100,6 +104,21 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 
 ## 安装
 
+### 方式一：在自己电脑上的 DSH 里填表安装
+
+Mac、Windows、Linux 上的 DSH 都可以：
+
+1. 在 DSH 里装上插件 `dsh-vps`：插件市场搜索安装，或执行 `dsh plugin add dsh-vps`
+2. 打开「设置 → VPS 部署」，填服务器 IP、SSH 端口、用户名、密码；有域名（A 记录已解析到服务器）再填上域名，服务器在国内就勾上「服务器在国内」
+3. 点「安装到这台 VPS」
+
+- 密码只用这一次，不保存；留空则用本机已有的 SSH 密钥
+- 页面实时显示安装日志，完成后直接给出设置向导的链接
+- 安装在服务器上后台运行，中途关掉页面或网络断开都不影响
+- 需要本机有 OpenSSH 客户端：Mac、Linux 自带；Windows 10/11 在「设置 → 系统 → 可选功能」里添加「OpenSSH 客户端」
+
+### 方式二：在 VPS 上执行一键安装命令
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com
@@ -118,9 +137,7 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
 ```
 
-此时证书由 Caddy 内置 CA 自签，浏览器会提示「不安全 / 证书不受信任」，属预期现象，选择继续访问即可。之后在向导里填上域名，Caddy 自动换成正式证书。
-
-**在自己电脑上的 DSH 里填表安装**（Mac / Windows / Linux 的 DSH 都可以）：在 DSH 里装上插件 `dsh-vps`（插件市场搜索，或 `dsh plugin add dsh-vps`），打开「设置 → VPS 部署」，填服务器 IP、SSH 端口、用户名、密码（只用这一次，不保存；留空则用本机已有的 SSH 密钥），有域名再填上域名，点「安装到这台 VPS」。页面实时显示安装日志，完成后直接给出设置向导的链接。安装在服务器上后台运行，中途关掉页面或网络断开都不影响。需要本机有 OpenSSH 客户端（Mac、Linux 自带；Windows 10/11 在「设置 → 系统 → 可选功能」里添加「OpenSSH 客户端」）。
+此时证书由 Caddy 内置 CA 自签，浏览器会提示「不安全 / 证书不受信任」，属预期现象，选择继续访问即可。之后在向导里填上域名，Caddy 自动换成正式证书。（方式一不填域名时也是这样。）
 
 走 npm 也行，装的是这个包自带的同一份脚本（版本固定，不联网拉取；需本机已有 Node 22+）：
 
@@ -131,8 +148,8 @@ npx dsh-vps-install install --domain dsh.example.com
 想固定在某个发布版本（而非 `main`），把地址里的 `main` 换成版本 tag，并让后续拉取的网关文件也用同一版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3/install.sh \
-  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3 bash -s -- --domain dsh.example.com
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0/install.sh \
+  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0 bash -s -- --domain dsh.example.com
 ```
 
 安装末尾的自检若报「DSH 尚未就绪」，设置链接照样会打印；页面会显示启动进度与具体错误，排障见 `journalctl -u dsh-gate -n 80 --no-pager`。
@@ -168,7 +185,7 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 ## 首次使用
 
-安装结束时终端会打印一条**带一次性令牌的初始设置链接**，浏览器打开它进入向导（直接打开 IP 或域名只会看到「需要启动令牌」页，这是有意的）：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与预置插件 → 登录即用。向导只对持有令牌的人开放，令牌在设置完成后自动作废。链接丢了随时重取：
+安装结束时会给出一条**带一次性令牌的初始设置链接**（命令行安装打印在终端里，填表安装显示在设置页上），浏览器打开它进入向导（直接打开 IP 或域名只会看到「需要启动令牌」页，这是有意的）：填管理员用户名/密码 → （可选）域名、DeepSeek API Key 与预置插件 → 登录即用。向导只对持有令牌的人开放，令牌在设置完成后自动作废。链接丢了随时重取：
 
 ```bash
 sudo dsh-vps setup-url
@@ -265,6 +282,7 @@ DSH 与网关均只绑 127.0.0.1，用户浏览器接触不到 DSH 的会话 Coo
 | `caddy/Caddyfile.template` | Caddy 主配置 |
 | `units/dsh-gate.service` | systemd 单元模板 |
 | `versions.json` | DSH 已验证版本清单 |
+| `plugin/` + `cordis.patch.yml` | DSH 插件：「设置 → VPS 部署」（版本与一键升级、网关状态；或填表经 SSH 安装到 VPS） |
 
 ---
 
