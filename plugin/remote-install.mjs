@@ -1,6 +1,6 @@
-// plugin/remote-install.mjs — 从这台 DSH 经 SSH 把 dsh-vps 装到指定的 VPS
+// plugin/remote-install.mjs — 从这台 DSH 经 SSH 把 dsh-vps 装到（或卸出）指定的 VPS
 //
-// 设置 → VPS 部署 的表单填好服务器信息后调用。要点：
+// 设置 → VPS 部署 的表单填好服务器信息后调用；action 为 install 或 uninstall。要点：
 //   - 密码只进这一次 ssh 子进程的环境变量，经 SSH_ASKPASS 小脚本交给 ssh：不写盘、不进日志、
 //     不保存（与 dsh-vps-manager「添加机器」同一做法）。不填密码则用本机已有的 SSH 密钥
 //   - 安装在服务器上以 nohup + setsid 后台运行，日志写 /var/log/dsh-vps-install.log；
@@ -15,8 +15,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
-const RAW_INSTALL = 'https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh'
-const REMOTE_LOG = '/var/log/dsh-vps-install.log'
+const RAW_BASE = 'https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main'
+const ACTIONS = {
+  install: { script: `${RAW_BASE}/install.sh`, log: '/var/log/dsh-vps-install.log' },
+  uninstall: { script: `${RAW_BASE}/uninstall.sh`, log: '/var/log/dsh-vps-uninstall.log' },
+}
 const JOB_TIMEOUT_MS = 40 * 60_000
 const MAX_LINES = 400
 
@@ -31,29 +34,40 @@ export function validateRequest(body) {
   const port = Number(b.port ?? 22)
   const user = String(b.user ?? 'root').trim() || 'root'
   const password = typeof b.password === 'string' ? b.password : ''
-  const domain = String(b.domain ?? '').trim().toLowerCase()
-  const mirror = b.mirror === true
+  const action = b.action === 'uninstall' ? 'uninstall' : 'install'
+  const domain = action === 'install' ? String(b.domain ?? '').trim().toLowerCase() : ''
+  const mirror = action === 'install' && b.mirror === true
+  // 卸载默认保留 DSH 数据（对话、设置）：不勾才删
+  const keepData = action === 'uninstall' && b.keepData !== false
+  const purgeCaddy = action === 'uninstall' && b.purgeCaddy === true
   if (!host || host.length > 253 || !HOST_RE.test(host)) return { error: '服务器地址格式不对（填公网 IP 或能解析到它的域名）' }
   if (!Number.isInteger(port) || port < 1 || port > 65535) return { error: 'SSH 端口应为 1–65535' }
   if (!USER_RE.test(user)) return { error: '用户名格式不对' }
   if (password.length > 1024) return { error: '密码太长' }
   if (domain && (domain.length > 253 || !DOMAIN_RE.test(domain))) return { error: '访问域名格式不对（例如 dsh.example.com）' }
-  return { value: { host, port, user, password, domain, mirror } }
+  return { value: { action, host, port, user, password, domain, mirror, keepData, purgeCaddy } }
+}
+
+/** 传给 install.sh / uninstall.sh 的参数 */
+export function scriptArgs({ action = 'install', domain, mirror, keepData, purgeCaddy }) {
+  if (action === 'uninstall') return ['--yes', ...(keepData ? ['--keep-data'] : []), ...(purgeCaddy ? ['--purge-caddy'] : [])]
+  return [...(domain ? ['--domain', domain] : []), ...(mirror ? ['--mirror', 'cn'] : [])]
 }
 
 /** 服务器上执行的脚本（经 stdin 交给 sh -s，参数不进命令行） */
-export function remoteScript({ domain, mirror }) {
-  const args = [...(domain ? ['--domain', domain] : []), ...(mirror ? ['--mirror', 'cn'] : [])]
+export function remoteScript(opts) {
+  const { script, log } = ACTIONS[opts.action === 'uninstall' ? 'uninstall' : 'install']
+  const args = scriptArgs(opts)
   // 参数已按正则校验（仅字母数字、点、横线），这里仍逐个单引号包起来
   const quoted = args.map((a) => `'${a.replace(/'/g, `'\\''`)}'`).join(' ')
   return [
     'set -u',
     'if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo -n"; $SUDO true 2>/dev/null || { echo "DSHVPS_ERR=need_root"; exit 3; }; fi',
     'if command -v curl >/dev/null 2>&1; then FETCH="curl -fsSL"; elif command -v wget >/dev/null 2>&1; then FETCH="wget -qO-"; else echo "DSHVPS_ERR=no_fetch"; exit 4; fi',
-    `L=${REMOTE_LOG}`,
+    `L=${log}`,
     '$SUDO rm -f "$L"',
-    // 后台独立运行：SSH 断开不影响安装；结束时在日志末尾写退出码
-    `$SUDO nohup setsid sh -c 'L="$1"; F="$2"; U="$3"; shift 3; { $F "$U" | bash -s -- "$@"; echo "DSHVPS_EXIT=$?"; } >>"$L" 2>&1' dshvps "$L" "$FETCH" '${RAW_INSTALL}' ${quoted} </dev/null >/dev/null 2>&1 &`,
+    // 后台独立运行：SSH 断开不影响安装/卸载；结束时在日志末尾写退出码
+    `$SUDO nohup setsid sh -c 'L="$1"; F="$2"; U="$3"; shift 3; { $F "$U" | bash -s -- "$@"; echo "DSHVPS_EXIT=$?"; } >>"$L" 2>&1' dshvps "$L" "$FETCH" '${script}' ${quoted} </dev/null >/dev/null 2>&1 &`,
     'P=$!',
     'for i in 1 2 3 4 5 6 7 8 9 10; do [ -f "$L" ] && break; sleep 1; done',
     'echo "DSHVPS_STARTED"',
@@ -70,6 +84,12 @@ export function findSetupUrl(text) {
   if (m) return m[0]
   const a = /访问地址\s*:\s*(https:\/\/\S+)/.exec(text)
   return a ? a[1] : null
+}
+
+/** 卸载输出里的备份位置（uninstall.sh 结尾打印「备份：/root/dsh-vps-uninstall-….tar.gz」） */
+export function findBackupPath(text) {
+  const m = /备份[：:]\s*(\/\S+\.tar\.gz)/.exec(text)
+  return m ? m[1] : null
 }
 
 /** 本机找不到 ssh 时告诉用户怎么装（与 dsh-vps-manager 同一说法） */
@@ -111,11 +131,14 @@ export function createInstaller({ spawnImpl = spawn, platform = process.platform
   }
 
   async function start(value) {
-    if (job && job.state === 'running') return { error: '已经有一个安装在进行中', status: 409 }
-    const { host, port, user, password, domain, mirror } = value
+    if (job && job.state === 'running') return { error: '已经有一个任务在进行中，等它结束再试', status: 409 }
+    const { host, port, user, password, domain, mirror, keepData, purgeCaddy } = value
+    const action = value.action === 'uninstall' ? 'uninstall' : 'install'
+    const remoteLog = ACTIONS[action].log
+    const verb = action === 'uninstall' ? '卸载' : '安装'
     job = {
-      state: 'running', host, port, user, domain, mirror,
-      startedAt: now(), endedAt: null, lines: [], setupUrl: null, error: null, phase: 'connecting',
+      action, state: 'running', host, port, user, domain, mirror, keepData, purgeCaddy,
+      startedAt: now(), endedAt: null, lines: [], setupUrl: null, backupPath: null, error: null, phase: 'connecting',
     }
     const current = job
     const target = `${user}@${host.includes(':') ? `[${host}]` : host}`
@@ -171,7 +194,8 @@ export function createInstaller({ spawnImpl = spawn, platform = process.platform
       }
       current.lines.push(clean)
       if (current.lines.length > MAX_LINES * 2) current.lines.splice(0, current.lines.length - MAX_LINES)
-      if (!current.setupUrl) current.setupUrl = findSetupUrl(clean)
+      if (action === 'install' && !current.setupUrl) current.setupUrl = findSetupUrl(clean)
+      if (action === 'uninstall' && !current.backupPath) current.backupPath = findBackupPath(clean)
     }
     child.stdout.on('data', (d) => {
       buf += outDec.write(d)
@@ -195,10 +219,12 @@ export function createInstaller({ spawnImpl = spawn, platform = process.platform
         current.state = 'success'
       } else if (remoteExit !== null) {
         current.state = 'failed'
-        current.error = `安装脚本执行失败（退出码 ${remoteExit}），详见下方日志；服务器上的完整日志：${REMOTE_LOG}`
+        current.error = `${verb}脚本执行失败（退出码 ${remoteExit}），详见下方日志；服务器上的完整日志：${remoteLog}`
       } else if (current.phase === 'installing') {
         current.state = 'failed'
-        current.error = `与服务器的连接中断了，但安装仍在服务器上继续运行。稍后 SSH 登录执行 sudo tail -n 50 ${REMOTE_LOG} 查看结果，或执行 sudo dsh-vps setup-url 取设置链接`
+        current.error = action === 'uninstall'
+          ? `与服务器的连接中断了，但卸载仍在服务器上继续运行。稍后 SSH 登录执行 sudo tail -n 50 ${remoteLog} 查看结果`
+          : `与服务器的连接中断了，但安装仍在服务器上继续运行。稍后 SSH 登录执行 sudo tail -n 50 ${remoteLog} 查看结果，或执行 sudo dsh-vps setup-url 取设置链接`
       } else {
         current.state = 'failed'
         current.error = classifyFailure(stderr, code, Boolean(password), platform)
@@ -216,7 +242,7 @@ export function createInstaller({ spawnImpl = spawn, platform = process.platform
         // 已退出
       }
     }, JOB_TIMEOUT_MS)
-    child.stdin.end(remoteScript({ domain, mirror }))
+    child.stdin.end(remoteScript({ action, domain, mirror, keepData, purgeCaddy }))
     return { job: snapshot().job }
   }
 

@@ -49,7 +49,6 @@ const CADDY_SITE_FILE = process.env.CADDY_SITE_FILE || "/etc/caddy/dsh-site.conf
 const DEEPSEEK_KEY_REF = "DEEPSEEK_API_KEY"; // DSH 约定：deriveKeyRef("deepseek")
 // /setup 向导可选的常用插件（package 名即 `dsh plugin --profile web add <pkg>` 的入参）
 const PLUGIN_OPTIONS = [
-	{ id: "dsh-vps", pkg: "dsh-vps", name: "VPS 部署 dsh-vps", desc: "本产品的设置页：在「设置 → VPS 部署」里查看 DSH 版本并一键升级、网关状态与服务器常用命令" },
 	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题，之后想装什么都在这里装" },
 	{ id: "dsh-vps-manager", pkg: "dsh-vps-manager", name: "VPS 管理 dsh-vps-manager", desc: "在 DSH 里直接管理这台 VPS：不花 token 的查询命令、对话内终端、按风险分级确认的 AI 操作、运维菜谱库" },
 ];

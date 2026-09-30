@@ -87,6 +87,9 @@ window.__ModuleLoader__.load({
       }),
       err: { border: `1px solid ${T.danger}`, color: T.danger, borderRadius: 6, padding: '8px 10px', marginTop: 8 },
       note: { border: line, borderRadius: 6, padding: '8px 10px', marginTop: 8, background: T.layer },
+      // 勾选框始终贴在文字左边（窄窗口里文字换行，勾选框不单独占一行）
+      check: { display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' },
+      checkbox: { flex: 'none', marginTop: 4 },
     }
 
     // ——————————————————————— 与网关通信 ———————————————————————
@@ -367,24 +370,43 @@ window.__ModuleLoader__.load({
             'Needs root and open ports 80/443. It prints a setup link with a one-time token at the end; open it to create the admin account.'))))
     }
 
+    const UNINSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh | sudo bash -s -- --yes --keep-data'
+
     function InstallProgress({ job, onReset }) {
       const logRef = useRef(null)
       useEffect(() => {
         if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
       }, [job.lines.length])
+      const un = job.action === 'uninstall'
       const running = job.state === 'running'
       const where = `${job.user}@${job.host}`
+      const title = running
+        ? (job.phase === 'installing'
+          ? (un ? t(`正在从 ${where} 卸载…`, `Uninstalling from ${where}…`) : t(`正在安装到 ${where}…`, `Installing on ${where}…`))
+          : t(`正在连接 ${where}…`, `Connecting to ${where}…`))
+        : job.state === 'success'
+          ? (un ? t('卸载完成', 'Uninstalled') : t('安装完成', 'Installed'))
+          : (un ? t('卸载未完成', 'Uninstall did not finish') : t('安装未完成', 'Install did not finish'))
       return h('div', null,
         h('div', { style: S.spread },
-          h('div', { style: S.h2 }, running
-            ? (job.phase === 'installing' ? t(`正在安装到 ${where}…`, `Installing on ${where}…`) : t(`正在连接 ${where}…`, `Connecting to ${where}…`))
-            : job.state === 'success' ? t('安装完成', 'Installed') : t('安装未完成', 'Install did not finish')),
+          h('div', { style: S.h2 }, title),
           h('span', { style: S.badge(running ? 'accent' : job.state === 'success' ? 'ok' : 'danger') },
             running ? t('进行中', 'Running') : job.state === 'success' ? t('成功', 'Done') : t('失败', 'Failed'))),
-        running ? h('div', { style: { ...S.muted, fontSize: 12 } },
-          t('通常需要 3–8 分钟（要下载 Node、DSH 与 Caddy）。可以关掉这一页，安装在服务器上继续进行，回来还能看到进度。',
+        running ? h('div', { style: { ...S.muted, fontSize: 12 } }, un
+          ? t('通常不到一分钟。可以关掉这一页，卸载在服务器上继续进行。', 'Usually under a minute. You can close this page — it keeps running on the server.')
+          : t('通常需要 3–8 分钟（要下载 Node、DSH 与 Caddy）。可以关掉这一页，安装在服务器上继续进行，回来还能看到进度。',
             'Usually 3–8 minutes (Node, DSH and Caddy are downloaded). You can close this page — the install keeps running on the server and progress is here when you come back.')) : null,
-        job.state === 'success'
+        job.state === 'success' && un
+          ? h('div', { style: S.note },
+            h('div', null, job.keepData
+              ? t('已从服务器移除 dsh-vps 的服务、网关与安装目录；DSH 数据（对话、设置）保留在 /home/dsh/.dsh，重新安装后可继续使用。',
+                'The dsh-vps services, gateway and install directory were removed; DSH data (conversations, settings) is kept in /home/dsh/.dsh for a later reinstall.')
+              : t('已从服务器移除 dsh-vps 的服务、网关、安装目录和 DSH 数据。', 'The dsh-vps services, gateway, install directory and DSH data were removed from the server.')),
+            job.backupPath
+              ? h('div', { style: { marginTop: 4 } }, t('删除前的备份：', 'Backup taken before removal: '), h('span', { style: S.code }, job.backupPath))
+              : null)
+          : null,
+        job.state === 'success' && !un
           ? h('div', { style: S.note },
             job.setupUrl
               ? h('div', null,
@@ -407,18 +429,20 @@ window.__ModuleLoader__.load({
           ? h('pre', { ref: logRef, style: { ...S.pre, marginTop: 8, maxHeight: 260, overflowY: 'auto' } }, job.lines.join('\n'))
           : null,
         running ? null : h('div', { style: { ...S.row, marginTop: 10 } },
-          h('button', { type: 'button', style: S.btn(), onClick: onReset }, job.state === 'success' ? t('再装一台', 'Install another') : t('返回修改', 'Back to the form'))))
+          h('button', { type: 'button', style: S.btn(), onClick: onReset }, job.state === 'success' ? t('完成', 'Done') : t('返回修改', 'Back to the form'))))
     }
 
     function DeployForm() {
       const [avail, setAvail] = useState('loading') // loading | yes | no
       const [job, setJob] = useState(null)
       const [showForm, setShowForm] = useState(true)
-      const [form, setForm] = useState({ host: '', port: '22', user: 'root', password: '', domain: '', mirror: false })
+      const [mode, setMode] = useState('install') // install | uninstall
+      const [form, setForm] = useState({ host: '', port: '22', user: 'root', password: '', domain: '', mirror: false, keepData: true, purgeCaddy: false })
       const [error, setError] = useState(null)
       const [busy, setBusy] = useState(false)
       const [manual, setManual] = useState(false)
       const timer = useRef(null)
+      const un = mode === 'uninstall'
 
       const poll = useCallback(() => {
         clearInterval(timer.current)
@@ -458,13 +482,17 @@ window.__ModuleLoader__.load({
         setError(null)
         if (!form.host.trim()) return setError(t('请填写服务器 IP 或域名', 'Enter the server IP or hostname'))
         const target = `${form.user || 'root'}@${form.host.trim()}`
-        const msg = t(
-          `在 ${target} 上安装 DeepSeek Harness（dsh-vps）？\n\n会安装 Node.js、DSH、Caddy 并创建系统服务，占用 80/443 端口。建议用一台新的或专用的服务器。`,
-          `Install DeepSeek Harness (dsh-vps) on ${target}?\n\nThis installs Node.js, DSH and Caddy, creates system services and uses ports 80/443. A fresh or dedicated server is recommended.`)
+        const msg = un
+          ? t(
+            `从 ${target} 卸载 DeepSeek Harness（dsh-vps）？\n\n将停止并删除网关与 DSH 服务、安装目录 /opt/dsh-vps、Caddy 站点配置${form.purgeCaddy ? '以及 Caddy 软件包' : ''}，${form.keepData ? '保留' : '并删除'} DSH 数据（对话、设置）。\n删除前会在服务器上打包备份到 /root。此操作不可撤销。`,
+            `Uninstall DeepSeek Harness (dsh-vps) from ${target}?\n\nThis stops and removes the gateway and DSH services, /opt/dsh-vps and the Caddy site config${form.purgeCaddy ? ' plus the Caddy package' : ''}, and ${form.keepData ? 'keeps' : 'deletes'} DSH data (conversations, settings).\nA backup is written to /root on the server first. This cannot be undone.`)
+          : t(
+            `在 ${target} 上安装 DeepSeek Harness（dsh-vps）？\n\n会安装 Node.js、DSH、Caddy 并创建系统服务，占用 80/443 端口。建议用一台新的或专用的服务器。`,
+            `Install DeepSeek Harness (dsh-vps) on ${target}?\n\nThis installs Node.js, DSH and Caddy, creates system services and uses ports 80/443. A fresh or dedicated server is recommended.`)
         if (!window.confirm(msg)) return
         setBusy(true)
         try {
-          const r = await installApi('POST', { ...form, port: Number(form.port) || 22 })
+          const r = await installApi('POST', { ...form, action: mode, port: Number(form.port) || 22 })
           setForm((f) => ({ ...f, password: '' })) // 密码不在页面里多留
           setJob(r.job)
           setShowForm(false)
@@ -480,33 +508,72 @@ window.__ModuleLoader__.load({
       if (avail === 'no') return h(ManualCommand)
       if (!showForm && job) return h(InstallProgress, { job, onReset: () => { setShowForm(true); setError(null) } })
 
+      const tab = (key, label) => h('button', {
+        type: 'button',
+        onClick: () => { setMode(key); setError(null) },
+        style: {
+          ...S.btn(), border: 'none', borderRadius: 0, padding: '6px 14px',
+          borderBottom: mode === key ? `2px solid ${key === 'uninstall' ? T.danger : T.accent}` : '2px solid transparent',
+          opacity: mode === key ? 1 : 0.6, fontWeight: mode === key ? 600 : 400,
+        },
+      }, label)
+
       return h('form', { onSubmit: submit },
-        h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 12 } },
-          h(Field, { label: t('服务器 IP 或域名', 'Server IP or hostname'), hint: t('你买的 VPS 的公网地址', 'The public address of your VPS') },
-            h('input', { style: inputStyle, value: form.host, onChange: set('host'), placeholder: '1.2.3.4', autoComplete: 'off', spellCheck: false })),
-          h(Field, { label: t('SSH 端口', 'SSH port') },
-            h('input', { style: inputStyle, value: form.port, onChange: set('port'), inputMode: 'numeric' })),
-          h(Field, { label: t('用户名', 'Username'), hint: t('建议用 root；其他用户需要免密 sudo', 'root recommended; other users need passwordless sudo') },
-            h('input', { style: inputStyle, value: form.user, onChange: set('user'), autoComplete: 'off', spellCheck: false })),
-          h(Field, { label: t('密码', 'Password'), hint: t('只用这一次，不保存；留空则用本机已有的 SSH 密钥', 'Used once, never stored; leave empty to use your existing SSH key') },
-            h('input', { style: inputStyle, type: 'password', value: form.password, onChange: set('password'), placeholder: t('服务器的登录密码', 'server login password'), autoComplete: 'new-password' }))),
-        h('div', { style: { marginTop: 12 } },
-          h(Field, { label: t('访问域名（可选）', 'Domain (optional)'), hint: t('已把 A 记录解析到这台服务器的域名，填了自动签发 HTTPS 证书；不填先用 IP + 自签证书，之后可在向导里补填', 'A domain whose A record points at this server gets an automatic HTTPS certificate; leave empty to start with the IP and a self-signed certificate') },
-            h('input', { style: inputStyle, value: form.domain, onChange: set('domain'), placeholder: 'dsh.example.com', autoComplete: 'off', spellCheck: false }))),
-        h('label', { style: { ...S.row, marginTop: 10, cursor: 'pointer' } },
-          h('input', { type: 'checkbox', checked: form.mirror, onChange: set('mirror') }),
-          h('span', null, t('服务器在国内（Node 与 DSH 从 npmmirror 下载）', 'Server is in mainland China (download Node and DSH from npmmirror)'))),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, borderBottom: line, marginBottom: 12 } },
+          tab('install', t('安装到 VPS', 'Install on a VPS')),
+          tab('uninstall', t('从 VPS 卸载', 'Uninstall from a VPS'))),
+        un ? h('div', { style: { ...S.muted, fontSize: 12, marginBottom: 10 } },
+          t('从服务器上移除 dsh-vps 部署的 DSH：网关、DSH 服务、安装目录与 Caddy 站点配置。删除前自动打包备份到服务器的 /root。',
+            'Removes a dsh-vps deployment from the server: the gateway, DSH services, install directory and Caddy site config. A backup is written to /root on the server first.')) : null,
+        // 窄窗口（小屏、Windows 上缩小的 DSH 窗口）自动变成一行一个：flex 换行而不是固定两栏
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 12 } },
+          h('div', { style: { flex: '2 1 220px', minWidth: 0 } },
+            h(Field, { label: t('服务器 IP 或域名', 'Server IP or hostname'), hint: t('你买的 VPS 的公网地址', 'The public address of your VPS') },
+              h('input', { style: inputStyle, value: form.host, onChange: set('host'), placeholder: '1.2.3.4', autoComplete: 'off', spellCheck: false }))),
+          h('div', { style: { flex: '1 1 100px', minWidth: 0 } },
+            h(Field, { label: t('SSH 端口', 'SSH port') },
+              h('input', { style: inputStyle, value: form.port, onChange: set('port'), inputMode: 'numeric' })))),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 12 } },
+          h('div', { style: { flex: '1 1 200px', minWidth: 0 } },
+            h(Field, { label: t('用户名', 'Username'), hint: t('建议用 root；其他用户需要免密 sudo', 'root recommended; other users need passwordless sudo') },
+              h('input', { style: inputStyle, value: form.user, onChange: set('user'), autoComplete: 'off', spellCheck: false }))),
+          h('div', { style: { flex: '1 1 200px', minWidth: 0 } },
+            h(Field, { label: t('密码', 'Password'), hint: t('只用这一次，不保存；留空则用本机已有的 SSH 密钥', 'Used once, never stored; leave empty to use your existing SSH key') },
+              h('input', { style: inputStyle, type: 'password', value: form.password, onChange: set('password'), placeholder: t('服务器的登录密码', 'server login password'), autoComplete: 'new-password' })))),
+        un
+          ? h('div', null,
+            h('label', { style: { ...S.check, marginTop: 12 } },
+              h('input', { type: 'checkbox', checked: form.keepData, onChange: set('keepData'), style: S.checkbox }),
+              h('span', null, t('保留 DSH 数据（对话、设置、插件，位于 /home/dsh/.dsh），以后重装可继续使用', 'Keep DSH data (conversations, settings, plugins in /home/dsh/.dsh) for a later reinstall'))),
+            h('label', { style: { ...S.check, marginTop: 6 } },
+              h('input', { type: 'checkbox', checked: form.purgeCaddy, onChange: set('purgeCaddy'), style: S.checkbox }),
+              h('span', null, t('连同 Caddy 软件包一起移除（服务器上还有别的网站在用 Caddy 时不要勾）', 'Also remove the Caddy package (leave unchecked if other sites on the server use Caddy)'))))
+          : h('div', null,
+            h('div', { style: { marginTop: 12 } },
+              h(Field, { label: t('访问域名（可选）', 'Domain (optional)'), hint: t('已把 A 记录解析到这台服务器的域名，填了自动签发 HTTPS 证书；不填先用 IP + 自签证书，之后可在向导里补填', 'A domain whose A record points at this server gets an automatic HTTPS certificate; leave empty to start with the IP and a self-signed certificate') },
+                h('input', { style: inputStyle, value: form.domain, onChange: set('domain'), placeholder: 'dsh.example.com', autoComplete: 'off', spellCheck: false }))),
+            h('label', { style: { ...S.check, marginTop: 10 } },
+              h('input', { type: 'checkbox', checked: form.mirror, onChange: set('mirror'), style: S.checkbox }),
+              h('span', null, t('服务器在国内（Node 与 DSH 从 npmmirror 下载）', 'Server is in mainland China (download Node and DSH from npmmirror)')))),
         error ? h('div', { style: S.err }, error) : null,
         h('div', { style: { ...S.row, marginTop: 12 } },
-          h('button', { type: 'submit', style: S.btn('primary', busy), disabled: busy }, busy ? t('连接中…', 'Connecting…') : t('安装到这台 VPS', 'Install on this VPS')),
+          h('button', {
+            type: 'submit',
+            style: un ? { ...S.btn(null, busy), borderColor: T.danger, color: T.danger } : S.btn('primary', busy),
+            disabled: busy,
+          }, busy ? t('连接中…', 'Connecting…') : un ? t('从这台 VPS 卸载', 'Uninstall from this VPS') : t('安装到这台 VPS', 'Install on this VPS')),
           h('button', { type: 'button', style: { ...S.btn(), border: 'none', opacity: 0.75 }, onClick: () => setManual(!manual) },
             manual ? t('收起手动命令', 'Hide manual command') : t('想自己在服务器上执行？', 'Prefer to run it yourself?'))),
-        manual ? h('div', { style: { marginTop: 8 } }, h(ManualCommand)) : null)
+        manual
+          ? h('div', { style: { marginTop: 8 } }, un
+            ? h(CopyLine, { text: UNINSTALL_CMD, note: t('去掉 --keep-data 则连 DSH 数据一起删除；加 --purge-caddy 连 Caddy 一起移除', 'Drop --keep-data to delete DSH data too; add --purge-caddy to remove Caddy as well') })
+            : h(ManualCommand))
+          : null)
     }
 
     function DeployGuide() {
       return h('div', { style: S.card },
-        h('div', { style: S.h2 }, t('把 DeepSeek Harness 装到你的 VPS', 'Install DeepSeek Harness on your VPS')),
+        h('div', { style: S.h2 }, t('在你的 VPS 上安装 / 卸载 DeepSeek Harness', 'Install / uninstall DeepSeek Harness on your VPS')),
         h('div', { style: { marginBottom: 12 } }, t(
           '填好一台 Ubuntu 22.04+ / Debian 12+ 服务器的登录信息，点「安装到这台 VPS」，就会在上面装好带登录页、自动 HTTPS 的原版 DSH。之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在那边的「设置 → VPS 部署」里一键升级。',
           'Enter the login details of an Ubuntu 22.04+ / Debian 12+ server and click "Install on this VPS" to set up stock DSH there behind a login page with automatic HTTPS. Then use it from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click under Settings → VPS Deploy over there.')),

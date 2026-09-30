@@ -57,7 +57,7 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | 登录门 | scrypt 口令 + HMAC 会话 Cookie + 登录限流 |
 | 浏览器初始向导 | 管理员账号、域名、DeepSeek API Key、预置插件，全程在浏览器里填完 |
 | 一次性启动令牌 | 向导只对持有令牌的人开放，链接随安装输出，`dsh-vps setup-url` 可重取，设置完成即作废 |
-| 预置插件一键装 | 向导内置 3 款（含本产品的「设置 → VPS 部署」页），默认全选、可取消，后台装完自动重启生效 |
+| 预置插件一键装 | 向导内置 2 款，默认全选、可取消，后台装完自动重启生效 |
 | 自动 HTTPS | Caddy 自动签发并续期证书；向导里改域名即时热加载 |
 | 公网可用的原生设置页 | 设置、模型、API Key、权限策略在公网域名下照常读写 |
 | 插件市场可用 | 市场里浏览/安装插件，点「立即重启」直接生效 |
@@ -181,7 +181,9 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
   | sudo bash -s -- --yes
 ```
 
-删除服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份（含 Caddyfile）到 `/root/dsh-vps-uninstall-<时间戳>.tar.gz`。安装前原有的 Caddyfile 会被还原；WireGuard 只移除 `dsh-vps vpn` 建的 wg0，你自己的隧道配置不动。`--keep-data` 保留 DSH 数据，`--purge-caddy` 连 Caddy 一起移除。卸载完再跑安装命令即为全新环境。
+**在自己电脑上的 DSH 里卸载**：「设置 → VPS 部署」→「从 VPS 卸载」，填服务器登录信息，选择是否保留 DSH 数据、是否连 Caddy 一起移除，点「从这台 VPS 卸载」。默认保留 DSH 数据。
+
+也可以在服务器上执行上面的命令：删除服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份（含 Caddyfile）到 `/root/dsh-vps-uninstall-<时间戳>.tar.gz`。安装前原有的 Caddyfile 会被还原；WireGuard 只移除 `dsh-vps vpn` 建的 wg0，你自己的隧道配置不动。`--keep-data` 保留 DSH 数据，`--purge-caddy` 连 Caddy 一起移除。卸载完再跑安装命令即为全新环境。
 
 ---
 
@@ -195,9 +197,7 @@ sudo dsh-vps setup-url
 
 API Key 跳过也无妨，登录后仍可在「添加 API Key」引导或 设置 → 模型 → DeepSeek 中补填。
 
-勾选的插件在后台安装（约几十秒），始终取 npm 上的最新版本，装完 DSH 自动重启生效，共三款：
-
-- **dsh-vps**（本产品自带）：DSH 设置里多出「VPS 部署」一页——查看 DSH 当前版本与官方最新版、一键升级（失败自动回滚）、网关状态与访问方式、服务器常用命令。装在别处的 DSH 里时，这一页显示把 DSH 部署到自己 VPS 的一键命令
+勾选的插件在后台安装（约几十秒），始终取 npm 上的最新版本，装完 DSH 自动重启生效，共两款：
 
 - **dsh-market**：设置页内浏览、搜索、一键安装社区插件与主题。其余插件留给你自己挑，装好后在市场里按需添加
 - **dsh-vps-manager**：在 DSH 里直接管理这台 VPS——`/vps-` 系列查询命令不经过模型、不花 token，对话内嵌终端，AI 操作按风险分级确认，另有运维菜谱库。需在 设置 → VPS Manager 中添加本机（SSH 密钥登录）
