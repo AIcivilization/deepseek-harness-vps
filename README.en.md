@@ -110,6 +110,8 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 The certificate then comes from Caddy's internal CA, so the browser warns "Not secure / certificate not trusted". That is expected — proceed anyway. Add a domain in the wizard later and Caddy switches to a real certificate.
 
+**Install from a form in your own DSH** (DSH on Mac, Windows or Linux): add the `dsh-vps` plugin (search the plugin market, or `dsh plugin add dsh-vps`), open **Settings → VPS Deploy**, enter the server IP, SSH port, username and password (used once, never stored; leave it empty to use your existing SSH key), plus a domain if you have one, and click "Install on this VPS". The page streams the install log and ends with the setup-wizard link. The install runs in the background on the server, so closing the page or losing the connection does not stop it. Needs an OpenSSH client on your computer (built into macOS and Linux; on Windows 10/11 add "OpenSSH Client" under Settings → System → Optional features).
+
 Or install through npm, running exactly the scripts shipped in this package (pinned, no network fetch; needs Node 22+ on the machine):
 
 ```bash

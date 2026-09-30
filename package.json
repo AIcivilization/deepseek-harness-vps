@@ -1,7 +1,7 @@
 {
   "name": "dsh-vps",
-  "version": "1.6.0",
-  "description": "Ship DeepSeek Harness to your own VPS: one command installs a zero-dependency login gateway, automatic HTTPS through Caddy, systemd supervision and one-click DSH upgrades; as a DSH plugin it adds Settings → VPS Deploy.",
+  "version": "1.7.0",
+  "description": "Ship DeepSeek Harness to your own VPS: one command (or a form in DSH Settings → VPS Deploy) installs a zero-dependency login gateway, automatic HTTPS through Caddy, systemd supervision and one-click DSH upgrades.",
   "keywords": [
     "deepseek-harness",
     "deepseek",
@@ -63,6 +63,7 @@
     "README.en.md",
     "LICENSE",
     "plugin/index.mjs",
+    "plugin/remote-install.mjs",
     "plugin/client.js",
     "cordis.patch.yml"
   ],

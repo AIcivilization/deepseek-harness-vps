@@ -320,24 +320,198 @@ window.__ModuleLoader__.load({
         rows.map(([cmd, note]) => h(CopyLine, { key: cmd, text: cmd, note })))
     }
 
-    // ——————————————————————— 普通 DSH：部署引导 ———————————————————————
+    // ——————————————————————— 普通 DSH：填表安装到 VPS ———————————————————————
 
-    function DeployGuide() {
-      return h('div', { style: S.card },
-        h('div', { style: S.h2 }, t('把 DeepSeek Harness 部署到你的 VPS', 'Deploy DeepSeek Harness to your VPS')),
-        h('div', null, t(
-          '这个 DSH 不是通过 dsh-vps 部署的。在一台 Ubuntu 22.04+ / Debian 12+ 的 VPS 上执行下面的命令，就能装好带登录页、自动 HTTPS 的原版 DSH，之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在这一页一键升级。',
-          'This DSH was not deployed with dsh-vps. Run the command below on an Ubuntu 22.04+ / Debian 12+ VPS to install stock DSH behind a login page with automatic HTTPS, reachable from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click on this page.')),
+    const INSTALL_API = '/api/dsh-vps.install'
+
+    async function installApi(method, body) {
+      const res = await fetch(INSTALL_API, {
+        method,
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: body ? { 'content-type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(30_000),
+      })
+      if (res.status === 404) return { unavailable: true }
+      let data = {}
+      try {
+        data = await res.json()
+      } catch {
+        // 非 JSON
+      }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      return data
+    }
+
+    function Field({ label, hint, children }) {
+      return h('label', { style: { display: 'block', minWidth: 0 } },
+        h('div', { style: { fontSize: 12, opacity: 0.75, marginBottom: 3 } }, label),
+        children,
+        hint ? h('div', { style: { ...S.muted, fontSize: 12, marginTop: 3 } }, hint) : null)
+    }
+
+    const inputStyle = {
+      width: '100%', boxSizing: 'border-box', border: line, borderRadius: 6, padding: '6px 8px',
+      background: 'transparent', color: 'inherit', fontSize: 13,
+    }
+
+    function ManualCommand() {
+      return h('div', null,
         h(CopyLine, { text: INSTALL_CMD }),
         h('ul', { style: { margin: '8px 0 0', paddingLeft: 18 } },
           h('li', null, t('有域名（A 记录已解析到服务器）：在末尾加 ', 'With a domain pointed at the server: append '),
             h('span', { style: S.code }, '-- --domain dsh.example.com'), t('，自动签发证书。', ' for an automatic certificate.')),
           h('li', null, t('国内网络：再加 ', 'Behind the GFW: also add '), h('span', { style: S.code }, '--mirror cn'), t('。', '.')),
           h('li', null, t('需要 root 权限，并开放 80/443 端口。安装结束时会打印带一次性令牌的设置链接，打开它创建管理员账号。',
-            'Needs root and open ports 80/443. It prints a setup link with a one-time token at the end; open it to create the admin account.')),
-          h('li', null, t('装了 dsh-vps-manager 的话，可以直接让对话里的 AI 在服务器上执行这条命令。',
-            'With dsh-vps-manager installed, you can ask the AI in the conversation to run this on the server.'))),
-        h('div', { style: { marginTop: 8 } },
+            'Needs root and open ports 80/443. It prints a setup link with a one-time token at the end; open it to create the admin account.'))))
+    }
+
+    function InstallProgress({ job, onReset }) {
+      const logRef = useRef(null)
+      useEffect(() => {
+        if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+      }, [job.lines.length])
+      const running = job.state === 'running'
+      const where = `${job.user}@${job.host}`
+      return h('div', null,
+        h('div', { style: S.spread },
+          h('div', { style: S.h2 }, running
+            ? (job.phase === 'installing' ? t(`正在安装到 ${where}…`, `Installing on ${where}…`) : t(`正在连接 ${where}…`, `Connecting to ${where}…`))
+            : job.state === 'success' ? t('安装完成', 'Installed') : t('安装未完成', 'Install did not finish')),
+          h('span', { style: S.badge(running ? 'accent' : job.state === 'success' ? 'ok' : 'danger') },
+            running ? t('进行中', 'Running') : job.state === 'success' ? t('成功', 'Done') : t('失败', 'Failed'))),
+        running ? h('div', { style: { ...S.muted, fontSize: 12 } },
+          t('通常需要 3–8 分钟（要下载 Node、DSH 与 Caddy）。可以关掉这一页，安装在服务器上继续进行，回来还能看到进度。',
+            'Usually 3–8 minutes (Node, DSH and Caddy are downloaded). You can close this page — the install keeps running on the server and progress is here when you come back.')) : null,
+        job.state === 'success'
+          ? h('div', { style: S.note },
+            job.setupUrl
+              ? h('div', null,
+                /\/setup\?token=/.test(job.setupUrl)
+                  ? h('div', null, t('打开下面的链接创建管理员账号（链接含一次性令牌，用过即失效）：',
+                    'Open the link below to create the admin account (it carries a one-time token):'))
+                  : h('div', null, t('这台服务器之前已经装过，本次按「修复/更新」完成，账号与数据保持不变：',
+                    'This server already had dsh-vps; it was repaired/updated in place, accounts and data kept:')),
+                h('div', { style: { ...S.row, marginTop: 6 } },
+                  h('a', { href: job.setupUrl, target: '_blank', rel: 'noreferrer', style: { ...S.btn('primary'), textDecoration: 'none' } },
+                    /\/setup\?token=/.test(job.setupUrl) ? t('打开设置向导', 'Open setup wizard') : t('打开 DSH', 'Open DSH')),
+                  h('span', { style: { ...S.code, wordBreak: 'break-all' } }, job.setupUrl)),
+                job.domain ? null : h('div', { style: { ...S.muted, fontSize: 12, marginTop: 6 } },
+                  t('未填域名时使用自签证书，浏览器会提示“不安全”，选择继续访问即可；之后可在向导里填上域名。',
+                    'Without a domain a self-signed certificate is used: the browser warns, proceed anyway; you can add a domain in the wizard later.')))
+              : t('已安装。SSH 登录服务器执行 sudo dsh-vps setup-url 取设置链接。', 'Installed. Run sudo dsh-vps setup-url on the server to get the setup link.'))
+          : null,
+        job.error ? h('div', { style: S.err }, job.error) : null,
+        job.lines.length
+          ? h('pre', { ref: logRef, style: { ...S.pre, marginTop: 8, maxHeight: 260, overflowY: 'auto' } }, job.lines.join('\n'))
+          : null,
+        running ? null : h('div', { style: { ...S.row, marginTop: 10 } },
+          h('button', { type: 'button', style: S.btn(), onClick: onReset }, job.state === 'success' ? t('再装一台', 'Install another') : t('返回修改', 'Back to the form'))))
+    }
+
+    function DeployForm() {
+      const [avail, setAvail] = useState('loading') // loading | yes | no
+      const [job, setJob] = useState(null)
+      const [showForm, setShowForm] = useState(true)
+      const [form, setForm] = useState({ host: '', port: '22', user: 'root', password: '', domain: '', mirror: false })
+      const [error, setError] = useState(null)
+      const [busy, setBusy] = useState(false)
+      const [manual, setManual] = useState(false)
+      const timer = useRef(null)
+
+      const poll = useCallback(() => {
+        clearInterval(timer.current)
+        timer.current = setInterval(async () => {
+          try {
+            const r = await installApi('GET')
+            if (r.job) setJob(r.job)
+            if (!r.job || r.job.state !== 'running') clearInterval(timer.current)
+          } catch {
+            // 暂时连不上 DSH：下次再试
+          }
+        }, 2000)
+      }, [])
+
+      useEffect(() => {
+        ;(async () => {
+          try {
+            const r = await installApi('GET')
+            if (r.unavailable) return setAvail('no')
+            setAvail('yes')
+            if (r.job) {
+              setJob(r.job)
+              setShowForm(false)
+              if (r.job.state === 'running') poll()
+            }
+          } catch {
+            setAvail('no')
+          }
+        })()
+        return () => clearInterval(timer.current)
+      }, [poll])
+
+      const set = (k) => (e) => setForm({ ...form, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
+
+      async function submit(e) {
+        e.preventDefault()
+        setError(null)
+        if (!form.host.trim()) return setError(t('请填写服务器 IP 或域名', 'Enter the server IP or hostname'))
+        const target = `${form.user || 'root'}@${form.host.trim()}`
+        const msg = t(
+          `在 ${target} 上安装 DeepSeek Harness（dsh-vps）？\n\n会安装 Node.js、DSH、Caddy 并创建系统服务，占用 80/443 端口。建议用一台新的或专用的服务器。`,
+          `Install DeepSeek Harness (dsh-vps) on ${target}?\n\nThis installs Node.js, DSH and Caddy, creates system services and uses ports 80/443. A fresh or dedicated server is recommended.`)
+        if (!window.confirm(msg)) return
+        setBusy(true)
+        try {
+          const r = await installApi('POST', { ...form, port: Number(form.port) || 22 })
+          setForm((f) => ({ ...f, password: '' })) // 密码不在页面里多留
+          setJob(r.job)
+          setShowForm(false)
+          poll()
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      if (avail === 'loading') return h('div', { style: S.muted }, t('读取中…', 'Loading…'))
+      if (avail === 'no') return h(ManualCommand)
+      if (!showForm && job) return h(InstallProgress, { job, onReset: () => { setShowForm(true); setError(null) } })
+
+      return h('form', { onSubmit: submit },
+        h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,2fr) minmax(0,1fr)', gap: 12 } },
+          h(Field, { label: t('服务器 IP 或域名', 'Server IP or hostname'), hint: t('你买的 VPS 的公网地址', 'The public address of your VPS') },
+            h('input', { style: inputStyle, value: form.host, onChange: set('host'), placeholder: '1.2.3.4', autoComplete: 'off', spellCheck: false })),
+          h(Field, { label: t('SSH 端口', 'SSH port') },
+            h('input', { style: inputStyle, value: form.port, onChange: set('port'), inputMode: 'numeric' })),
+          h(Field, { label: t('用户名', 'Username'), hint: t('建议用 root；其他用户需要免密 sudo', 'root recommended; other users need passwordless sudo') },
+            h('input', { style: inputStyle, value: form.user, onChange: set('user'), autoComplete: 'off', spellCheck: false })),
+          h(Field, { label: t('密码', 'Password'), hint: t('只用这一次，不保存；留空则用本机已有的 SSH 密钥', 'Used once, never stored; leave empty to use your existing SSH key') },
+            h('input', { style: inputStyle, type: 'password', value: form.password, onChange: set('password'), placeholder: t('服务器的登录密码', 'server login password'), autoComplete: 'new-password' }))),
+        h('div', { style: { marginTop: 12 } },
+          h(Field, { label: t('访问域名（可选）', 'Domain (optional)'), hint: t('已把 A 记录解析到这台服务器的域名，填了自动签发 HTTPS 证书；不填先用 IP + 自签证书，之后可在向导里补填', 'A domain whose A record points at this server gets an automatic HTTPS certificate; leave empty to start with the IP and a self-signed certificate') },
+            h('input', { style: inputStyle, value: form.domain, onChange: set('domain'), placeholder: 'dsh.example.com', autoComplete: 'off', spellCheck: false }))),
+        h('label', { style: { ...S.row, marginTop: 10, cursor: 'pointer' } },
+          h('input', { type: 'checkbox', checked: form.mirror, onChange: set('mirror') }),
+          h('span', null, t('服务器在国内（Node 与 DSH 从 npmmirror 下载）', 'Server is in mainland China (download Node and DSH from npmmirror)'))),
+        error ? h('div', { style: S.err }, error) : null,
+        h('div', { style: { ...S.row, marginTop: 12 } },
+          h('button', { type: 'submit', style: S.btn('primary', busy), disabled: busy }, busy ? t('连接中…', 'Connecting…') : t('安装到这台 VPS', 'Install on this VPS')),
+          h('button', { type: 'button', style: { ...S.btn(), border: 'none', opacity: 0.75 }, onClick: () => setManual(!manual) },
+            manual ? t('收起手动命令', 'Hide manual command') : t('想自己在服务器上执行？', 'Prefer to run it yourself?'))),
+        manual ? h('div', { style: { marginTop: 8 } }, h(ManualCommand)) : null)
+    }
+
+    function DeployGuide() {
+      return h('div', { style: S.card },
+        h('div', { style: S.h2 }, t('把 DeepSeek Harness 部署到你的 VPS', 'Deploy DeepSeek Harness to your VPS')),
+        h('div', { style: { marginBottom: 12 } }, t(
+          '这个 DSH 不是通过 dsh-vps 部署的。填好一台 Ubuntu 22.04+ / Debian 12+ 服务器的登录信息，就能在上面装好带登录页、自动 HTTPS 的原版 DSH，之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在设置里一键升级。',
+          'This DSH was not deployed with dsh-vps. Enter the login details of an Ubuntu 22.04+ / Debian 12+ server to install stock DSH there behind a login page with automatic HTTPS, reachable from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click in Settings.')),
+        h(DeployForm),
+        h('div', { style: { marginTop: 10 } },
           h('a', { href: REPO, target: '_blank', rel: 'noreferrer', style: { color: T.accent } }, t('完整说明（GitHub）', 'Full guide (GitHub)'))))
     }
 

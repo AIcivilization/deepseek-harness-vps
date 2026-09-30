@@ -120,6 +120,8 @@ curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps
 
 此时证书由 Caddy 内置 CA 自签，浏览器会提示「不安全 / 证书不受信任」，属预期现象，选择继续访问即可。之后在向导里填上域名，Caddy 自动换成正式证书。
 
+**在自己电脑上的 DSH 里填表安装**（Mac / Windows / Linux 的 DSH 都可以）：在 DSH 里装上插件 `dsh-vps`（插件市场搜索，或 `dsh plugin add dsh-vps`），打开「设置 → VPS 部署」，填服务器 IP、SSH 端口、用户名、密码（只用这一次，不保存；留空则用本机已有的 SSH 密钥），有域名再填上域名，点「安装到这台 VPS」。页面实时显示安装日志，完成后直接给出设置向导的链接。安装在服务器上后台运行，中途关掉页面或网络断开都不影响。需要本机有 OpenSSH 客户端（Mac、Linux 自带；Windows 10/11 在「设置 → 系统 → 可选功能」里添加「OpenSSH 客户端」）。
+
 走 npm 也行，装的是这个包自带的同一份脚本（版本固定，不联网拉取；需本机已有 Node 22+）：
 
 ```bash
