@@ -432,17 +432,17 @@ window.__ModuleLoader__.load({
           h('button', { type: 'button', style: S.btn(), onClick: onReset }, job.state === 'success' ? t('完成', 'Done') : t('返回修改', 'Back to the form'))))
     }
 
-    function DeployForm() {
+    function DeployForm({ mode, deployedHost }) {
       const [avail, setAvail] = useState('loading') // loading | yes | no
       const [job, setJob] = useState(null)
       const [showForm, setShowForm] = useState(true)
-      const [mode, setMode] = useState('install') // install | uninstall
       const [form, setForm] = useState({ host: '', port: '22', user: 'root', password: '', domain: '', mirror: false, keepData: true, purgeCaddy: false })
       const [error, setError] = useState(null)
       const [busy, setBusy] = useState(false)
       const [manual, setManual] = useState(false)
       const timer = useRef(null)
       const un = mode === 'uninstall'
+      useEffect(() => setError(null), [mode])
 
       const poll = useCallback(() => {
         clearInterval(timer.current)
@@ -508,23 +508,12 @@ window.__ModuleLoader__.load({
       if (avail === 'no') return h(ManualCommand)
       if (!showForm && job) return h(InstallProgress, { job, onReset: () => { setShowForm(true); setError(null) } })
 
-      const tab = (key, label) => h('button', {
-        type: 'button',
-        onClick: () => { setMode(key); setError(null) },
-        style: {
-          ...S.btn(), border: 'none', borderRadius: 0, padding: '6px 14px',
-          borderBottom: mode === key ? `2px solid ${key === 'uninstall' ? T.danger : T.accent}` : '2px solid transparent',
-          opacity: mode === key ? 1 : 0.6, fontWeight: mode === key ? 600 : 400,
-        },
-      }, label)
-
       return h('form', { onSubmit: submit },
-        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, borderBottom: line, marginBottom: 12 } },
-          tab('install', t('安装到 VPS', 'Install on a VPS')),
-          tab('uninstall', t('从 VPS 卸载', 'Uninstall from a VPS'))),
-        un ? h('div', { style: { ...S.muted, fontSize: 12, marginBottom: 10 } },
-          t('从服务器上移除 dsh-vps 部署的 DSH：网关、DSH 服务、安装目录与 Caddy 站点配置。删除前自动打包备份到服务器的 /root。',
-            'Removes a dsh-vps deployment from the server: the gateway, DSH services, install directory and Caddy site config. A backup is written to /root on the server first.')) : null,
+        un && deployedHost
+          ? h('div', { style: { ...S.note, marginTop: 0, marginBottom: 10 } }, t(
+            `如果要卸载的就是当前这台（${deployedHost}），卸载一开始这个页面就会断开——卸载仍会在服务器上完成，结果用 SSH 登录查看。`,
+            `If you are uninstalling this very server (${deployedHost}), this page disconnects as soon as it starts — the uninstall still completes on the server; check the result over SSH.`))
+          : null,
         // 窄窗口（小屏、Windows 上缩小的 DSH 窗口）自动变成一行一个：flex 换行而不是固定两栏
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 12 } },
           h('div', { style: { flex: '2 1 220px', minWidth: 0 } },
@@ -571,21 +560,37 @@ window.__ModuleLoader__.load({
           : null)
     }
 
-    function DeployGuide() {
-      return h('div', { style: S.card },
-        h('div', { style: S.h2 }, t('在你的 VPS 上安装 / 卸载 DeepSeek Harness', 'Install / uninstall DeepSeek Harness on your VPS')),
-        h('div', { style: { marginBottom: 12 } }, t(
-          '填好一台 Ubuntu 22.04+ / Debian 12+ 服务器的登录信息，点「安装到这台 VPS」，就会在上面装好带登录页、自动 HTTPS 的原版 DSH。之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在那边的「设置 → VPS 部署」里一键升级。',
-          'Enter the login details of an Ubuntu 22.04+ / Debian 12+ server and click "Install on this VPS" to set up stock DSH there behind a login page with automatic HTTPS. Then use it from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click under Settings → VPS Deploy over there.')),
-        h(DeployForm),
-        h('div', { style: { marginTop: 10 } },
-          h('a', { href: REPO, target: '_blank', rel: 'noreferrer', style: { color: T.accent } }, t('完整说明（GitHub）', 'Full guide (GitHub)'))))
+    function Tabs({ tabs, value, onChange }) {
+      return h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4, borderBottom: line, marginBottom: 12 } },
+        tabs.map(([key, label, danger]) => h('button', {
+          key,
+          type: 'button',
+          onClick: () => onChange(key),
+          style: {
+            ...S.btn(), border: 'none', borderRadius: 0, padding: '6px 14px',
+            borderBottom: value === key ? `2px solid ${danger ? T.danger : T.accent}` : '2px solid transparent',
+            opacity: value === key ? 1 : 0.6, fontWeight: value === key ? 600 : 400,
+          },
+        }, label)))
+    }
+
+    function InstallIntro({ deployed }) {
+      return h('div', { style: { marginBottom: 12 } }, t(
+        `填好一台 Ubuntu 22.04+ / Debian 12+ 服务器的登录信息，点「安装到这台 VPS」，就会在上面装好带登录页、自动 HTTPS 的原版 DSH。之后在任何地方用浏览器访问：设置、API Key、插件市场都能正常用，DSH 出新版本时在那边的「设置 → VPS 部署」里一键升级。${deployed ? '这里的安装是从当前这台服务器经 SSH 装到另一台服务器。' : ''}`,
+        `Enter the login details of an Ubuntu 22.04+ / Debian 12+ server and click "Install on this VPS" to set up stock DSH there behind a login page with automatic HTTPS. Then use it from any browser — settings, API keys and the plugin market all work, and new DSH releases upgrade with one click under Settings → VPS Deploy over there.${deployed ? ' The install runs over SSH from this server to the other one.' : ''}`))
+    }
+
+    function UninstallIntro() {
+      return h('div', { style: { marginBottom: 12 } }, t(
+        '从服务器上移除 dsh-vps 部署的 DSH：网关、DSH 服务、安装目录与 Caddy 站点配置。删除前自动打包备份到服务器的 /root；默认保留 DSH 数据（对话、设置），以后重装可继续使用。',
+        'Removes a dsh-vps deployment from a server: the gateway, DSH services, install directory and Caddy site config. A backup is written to /root on the server first; DSH data (conversations, settings) is kept by default for a later reinstall.'))
     }
 
     // ——————————————————————— 设置页 ———————————————————————
 
     function SettingsSection() {
-      const [mode, setMode] = useState('loading')
+      const [where, setWhere] = useState('loading') // loading | deployed | standalone
+      const [tab, setTab] = useState(null)
       const [info, setInfo] = useState(null)
       const [health, setHealth] = useState(null)
 
@@ -595,11 +600,13 @@ window.__ModuleLoader__.load({
           const u = await gateGet('/gate/update')
           if (!alive) return
           if (!u || !('current' in u)) {
-            setMode('standalone')
+            setWhere('standalone')
+            setTab('install')
             return
           }
           setInfo(u)
-          setMode('deployed')
+          setWhere('deployed')
+          setTab('status')
           const hh = await gateGet('/gate/health')
           if (alive) setHealth(hh)
         })()
@@ -608,12 +615,32 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
-      if (mode === 'loading') return h('div', { style: { ...S.root, ...S.muted } }, t('读取中…', 'Loading…'))
-      if (mode === 'standalone') return h('div', { style: S.root }, h(DeployGuide))
+      if (where === 'loading') return h('div', { style: { ...S.root, ...S.muted } }, t('读取中…', 'Loading…'))
+      const deployed = where === 'deployed'
+      const host = health?.dsh?.trustedHost || (typeof window !== 'undefined' ? window.location.host : '')
+      const tabs = [
+        ...(deployed ? [['status', t('本机状态', 'This server')]] : []),
+        ['install', t('安装到 VPS', 'Install on a VPS')],
+        ['uninstall', t('从 VPS 卸载', 'Uninstall from a VPS'), true],
+      ]
       return h('div', { style: S.root },
-        h(VersionCard, { info, reload: setInfo }),
-        h(GatewayCard, { health }),
-        h(CommandsCard))
+        // 一句话说明当前这个 DSH 在哪里运行：两边的页签不同，原因在这里
+        h('div', { style: { ...S.note, marginTop: 0, marginBottom: 12 } }, deployed
+          ? t(`当前这个 DSH 运行在由 dsh-vps 部署的服务器上（${host}）。「本机状态」管理这台服务器；也可以从这里把 DSH 装到另一台 VPS，或从某台 VPS 上卸载。`,
+            `This DSH runs on a server deployed by dsh-vps (${host}). "This server" manages it; you can also install DSH on another VPS from here, or uninstall it from one.`)
+          : t('当前是在你自己电脑上运行的 DSH。可以把 DSH 装到你的 VPS 上，或从某台 VPS 上卸载。',
+            'This DSH runs on your own computer. Install DSH on your VPS from here, or uninstall it from one.')),
+        h(Tabs, { tabs, value: tab, onChange: setTab }),
+        tab === 'status'
+          ? h('div', null,
+            h(VersionCard, { info, reload: setInfo }),
+            h(GatewayCard, { health }),
+            h(CommandsCard))
+          : h('div', { style: S.card },
+            tab === 'uninstall' ? h(UninstallIntro) : h(InstallIntro, { deployed }),
+            h(DeployForm, { mode: tab === 'uninstall' ? 'uninstall' : 'install', deployedHost: deployed ? host : null }),
+            h('div', { style: { marginTop: 10 } },
+              h('a', { href: REPO, target: '_blank', rel: 'noreferrer', style: { color: T.accent } }, t('完整说明（GitHub）', 'Full guide (GitHub)')))))
     }
 
     // ——————————————————————— 注册 ———————————————————————

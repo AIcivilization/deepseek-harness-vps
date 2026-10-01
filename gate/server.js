@@ -49,6 +49,8 @@ const CADDY_SITE_FILE = process.env.CADDY_SITE_FILE || "/etc/caddy/dsh-site.conf
 const DEEPSEEK_KEY_REF = "DEEPSEEK_API_KEY"; // DSH 约定：deriveKeyRef("deepseek")
 // /setup 向导可选的常用插件（package 名即 `dsh plugin --profile web add <pkg>` 的入参）
 const PLUGIN_OPTIONS = [
+	// required：本产品自己的设置页（版本与一键升级、网关状态、安装/卸载到 VPS），必装，向导里勾选且不可取消
+	{ id: "dsh-vps", pkg: "dsh-vps", name: "VPS 部署 dsh-vps（必装）", desc: "本产品的设置页「设置 → VPS 部署」：DSH 版本与一键升级、网关状态，以及把 DSH 安装到 / 卸载出其他 VPS", required: true },
 	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题，之后想装什么都在这里装" },
 	{ id: "dsh-vps-manager", pkg: "dsh-vps-manager", name: "VPS 管理 dsh-vps-manager", desc: "在 DSH 里直接管理这台 VPS：不花 token 的查询命令、对话内终端、按风险分级确认的 AI 操作、运维菜谱库" },
 ];
@@ -1453,7 +1455,7 @@ ${token ? `<input type="hidden" name="token" value="${esc(token)}">` : ""}
 <hr>
 <p class="hint" style="margin:2px 0 0">预置插件（默认全选，可取消；其余插件装好后随时在插件市场里自行安装）</p>
 ${PLUGIN_OPTIONS.map((o) => `
-<label class="chk"><input type="checkbox" name="plugin" value="${o.id}" checked> <span>${esc(o.name)}<br><span class="tip">${esc(o.desc)}</span></span></label>`).join("")}
+<label class="chk"><input type="checkbox" name="plugin" value="${o.id}" checked${o.required ? " disabled" : ""}> <span>${esc(o.name)}<br><span class="tip">${esc(o.desc)}</span></span></label>`).join("")}
 <button type="submit">完成设置</button>
 </form>
 ${repoLink()}
@@ -1544,8 +1546,10 @@ async function handleSetup(req, res) {
 	const apiKey = String(form.get("apiKey") || "").trim();
 	const plugins = (form.getAll("plugin") || [])
 		.map((v) => PLUGIN_OPTIONS.find((o) => o.id === v || o.pkg === v))
-		.filter(Boolean)
-		.filter((o, i, arr) => arr.findIndex((x) => x.pkg === o.pkg) === i);
+		.filter(Boolean);
+	// 必装项不看表单：disabled 的勾选框不会随表单提交，而且也不该允许被去掉
+	for (const o of PLUGIN_OPTIONS) if (o.required) plugins.unshift(o);
+	const pluginsToInstall = plugins.filter((o, i, arr) => arr.findIndex((x) => x.pkg === o.pkg) === i);
 
 	const redisplay = (error) => {
 		recordSetupFailure(ip);
@@ -1589,9 +1593,9 @@ async function handleSetup(req, res) {
 	clearSetupToken();
 	log("setup completed; wizard locked");
 
-	if (plugins.length) {
-		log(`setup: installing plugins in background: ${plugins.map((o) => o.pkg).join(", ")}`);
-		installPlugins(plugins).catch((err) => log(`plugin install aborted: ${err && err.message}`));
+	if (pluginsToInstall.length) {
+		log(`setup: installing plugins in background: ${pluginsToInstall.map((o) => o.pkg).join(", ")}`);
+		installPlugins(pluginsToInstall).catch((err) => log(`plugin install aborted: ${err && err.message}`));
 	}
 
 	if (warnings.length) {

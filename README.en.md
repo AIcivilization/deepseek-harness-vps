@@ -52,7 +52,7 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | Login gate | scrypt password + HMAC session cookie + rate limiting |
 | Browser setup wizard | admin account, domain, DeepSeek API key and bundled plugins — all filled in from the browser |
 | One-time setup token | the wizard only answers to holders of the token; the link is printed at install time, re-printable, and voided once setup completes |
-| One-click bundled plugins | 2 shipped in the wizard, pre-checked and uncheckable, installed in the background and activated by an automatic restart |
+| One-click bundled plugins | 3 shipped in the wizard: this project's settings page dsh-vps (required), plus the plugin market and VPS manager (pre-checked, optional); installed in the background and activated by an automatic restart |
 | Automatic HTTPS | Caddy issues and renews certificates; changing the domain in the wizard hot-reloads instantly |
 | Native settings on a public domain | settings, models, API keys and permission policies read and write normally |
 | Working plugin marketplace | browse and install plugins from the marketplace, and "restart now" just works |
@@ -187,7 +187,9 @@ sudo dsh-vps setup-url
 
 Skipping the API key is fine; you can add it later via the "Add API key" prompt or Settings → Models → DeepSeek.
 
-The checked plugins install in the background (tens of seconds), always at their latest npm version, and DSH restarts to activate them. Two of them:
+The plugins install in the background (tens of seconds), always at their latest npm version, and DSH restarts to activate them. Three of them:
+
+- **dsh-vps** (this project, required): the **Settings → VPS Deploy** page in DSH with three tabs — "This server" (DSH version with one-click upgrade, gateway status and access mode, common server commands), "Install on a VPS" and "Uninstall from a VPS" (install DSH on, or remove it from, another VPS over SSH). In the DSH on your own computer it shows only the last two
 
 - **dsh-market**: browse, search and install community plugins and themes from Settings. Everything else is left to you — add whatever you want from the marketplace afterwards
 - **dsh-vps-manager**: manage this very VPS from inside DSH — `/vps-` queries that skip the model and cost no tokens, a terminal in the conversation, AI operations confirmed by risk level, and a recipe library. Add this machine under Settings → VPS Manager (SSH key login)
