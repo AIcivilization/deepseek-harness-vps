@@ -54,7 +54,8 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | 能力 | 说明 |
 | --- | --- |
 | 两种装法 | 在自己电脑上的 DSH 里填表、点一下安装（Mac / Windows / Linux）；或在 VPS 上执行一条 `curl \| bash`。装完即 systemd 托管、开机自启 |
-| 登录门 | scrypt 口令 + HMAC 会话 Cookie + 登录限流 |
+| 登录门 | scrypt 口令 + HMAC 会话 Cookie + 登录限流；「保持登录」默认勾选，30 天内免登录 |
+| 添加到手机桌面 | 「设置 → VPS 部署 → 本机状态」里扫码，在手机上把 DSH 当作应用添加到主屏幕，全屏打开、像原生应用一样使用 |
 | 浏览器初始向导 | 管理员账号、域名、DeepSeek API Key、预置插件，全程在浏览器里填完 |
 | 中英双语 | 登录页、初始向导、启动等待页按浏览器语言显示中文或英文，右上角可手动切换并记住；DSH 内的「VPS 部署」页与升级提示条跟随 DSH 的语言设置 |
 | 一次性启动令牌 | 向导只对持有令牌的人开放，链接随安装输出，`dsh-vps setup-url` 可重取，设置完成即作废 |

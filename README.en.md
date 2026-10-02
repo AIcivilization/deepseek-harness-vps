@@ -49,7 +49,8 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | Capability | Notes |
 | --- | --- |
 | Two ways to install | fill in a form and click install from the DSH on your own computer (Mac / Windows / Linux), or run one `curl \| bash` on the VPS; then it runs as a systemd service, started on boot |
-| Login gate | scrypt password + HMAC session cookie + rate limiting |
+| Login gate | scrypt password + HMAC session cookie + rate limiting; "Keep me signed in" (on by default) lasts 30 days |
+| Add to your phone's home screen | scan the QR code under Settings → VPS Deploy → This server and add DSH to your home screen; it opens full-screen like a native app |
 | Browser setup wizard | admin account, domain, DeepSeek API key and bundled plugins — all filled in from the browser |
 | Chinese and English | the sign-in page, setup wizard and startup page follow the browser language, with a switch in the top-right corner that is remembered; the VPS Deploy page and upgrade prompt inside DSH follow the DSH language setting |
 | One-time setup token | the wizard only answers to holders of the token; the link is printed at install time, re-printable, and voided once setup completes |

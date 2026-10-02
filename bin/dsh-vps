@@ -494,17 +494,25 @@ const SNIPPET =
 // 升级提示条：同源脚本，由 gate 提供（/gate/ui.js）
 const UI_MARK = "dsh-vps:ui";
 const UI_SNIPPET = '<script data-dsh-vps="' + UI_MARK + '" src="/gate/ui.js" defer></script>';
+// 添加到手机桌面：iPhone 用的 PNG 图标与桌面上的名字（与 gate/server.js 的 HOME_SCREEN_TAGS 一致）
+const ICON_MARK = "dsh-vps:icon";
+const ICON_SNIPPET =
+	'<link rel="apple-touch-icon" href="/gate/apple-touch-icon.png" data-dsh-vps="' + ICON_MARK + '">' +
+	'<meta name="apple-mobile-web-app-title" content="DSH">' +
+	'<meta name="apple-mobile-web-app-capable" content="yes">' +
+	'<meta name="mobile-web-app-capable" content="yes">';
 let s = fs.readFileSync(file, "utf8");
 const orig = file + ".orig";
 if (mode === "off") {
 	if (fs.existsSync(orig)) fs.copyFileSync(orig, file);
-	else fs.writeFileSync(file, s.split("\n").filter((l) => !l.includes(MARK) && !l.includes(UI_MARK)).join("\n"));
+	else fs.writeFileSync(file, s.split("\n").filter((l) => !l.includes(MARK) && !l.includes(UI_MARK) && !l.includes(ICON_MARK)).join("\n"));
 	console.log("off");
 	process.exit(0);
 }
 const missing = [];
 if (!s.includes(MARK)) missing.push(SNIPPET);
 if (!s.includes(UI_MARK)) missing.push(UI_SNIPPET);
+if (!s.includes(ICON_MARK)) missing.push(ICON_SNIPPET);
 if (missing.length === 0) {
 	console.log("present");
 	process.exit(0);

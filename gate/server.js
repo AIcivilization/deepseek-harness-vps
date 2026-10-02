@@ -36,7 +36,10 @@ const DSH_HOST = "127.0.0.1"; // DSH 官方只允许绑回环
 const DSH_PORT = Number(process.env.DSH_PORT || 3080);
 // 向导（/setup）改域名时会在运行期更新，并同步写回 state/gate.env（供下次 systemd 启动）
 let dshTrustedHost = process.env.DSH_TRUSTED_HOST || "";
-const SESSION_TTL_MS = Number(process.env.SESSION_TTL_DAYS || 7) * 86_400_000;
+// 登录有效期：勾「保持登录」30 天（手机桌面应用里不用老是重新登录）；不勾则是浏览器会话 Cookie，
+// 关掉浏览器即失效，服务端也最多认 1 天
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_DAYS || 30) * 86_400_000;
+const SESSION_SHORT_TTL_MS = 86_400_000;
 const SESSION_COOKIE = "dshvps_session";
 const DSH_COOKIE_PREFIX = "dsh-auth-";
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -99,6 +102,16 @@ let ownshostLogged = false;
 // 升级提示条：同源脚本 /gate/ui.js。bin/dsh-vps 的静态补丁同样写入它，两边共用同一标记。
 const UI_MARK = "dsh-vps:ui";
 const UI_SNIPPET = `<script data-dsh-vps="${UI_MARK}" src="/gate/ui.js" defer></script>`;
+// 添加到手机桌面：iPhone 不认 manifest 里的 SVG 图标，要一张 PNG 的 apple-touch-icon；
+// 桌面上显示的名字用 DSH。登录页与 DSH 页面都带上（扫码后可能在登录前就添加）。
+// 图标文件 gate/apple-touch-icon.png 不在时路由返回 404，iPhone 退回用页面截图，不影响使用。
+const ICON_MARK = "dsh-vps:icon";
+const HOME_SCREEN_TAGS =
+	`<link rel="apple-touch-icon" href="/gate/apple-touch-icon.png" data-dsh-vps="${ICON_MARK}">` +
+	'<meta name="apple-mobile-web-app-title" content="DSH">' +
+	'<meta name="apple-mobile-web-app-capable" content="yes">' +
+	'<meta name="mobile-web-app-capable" content="yes">';
+const APPLE_TOUCH_ICON = path.join(__dirname, "apple-touch-icon.png");
 
 // DSH 版本检测：跟随官方最新版（npm latest 与 next 渠道中较新的一个）。页面上确认后，gate 只写 state/upgrade.request，
 // 由 root 的 dsh-vps-upgrade.path/.service 执行升级（gate 自身无权改 /opt/dsh-vps/dsh）。
@@ -373,14 +386,15 @@ function sessionUser(req) {
 	}
 }
 
-function sessionCookieHeader(req, admin) {
-	const expiresMs = Date.now() + SESSION_TTL_MS;
+function sessionCookieHeader(req, admin, remember = true) {
+	const ttl = remember ? SESSION_TTL_MS : SESSION_SHORT_TTL_MS;
+	const expiresMs = Date.now() + ttl;
 	// 站点一律 HTTPS（Caddy 自动签发，或自签过渡），Secure 无条件加上。
 	// 不读 x-forwarded-proto：那是个可被伪造的请求头，值得信任的只有"这里就是 HTTPS"这件事本身。
 	const secure = process.env.GATE_COOKIE_SECURE !== "0";
 	return [
 		`${SESSION_COOKIE}=${signSession(admin, expiresMs)}`,
-		`Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`,
+		...remember ? [`Max-Age=${Math.floor(ttl / 1000)}`] : [],
 		"Path=/",
 		"HttpOnly",
 		"SameSite=Lax",
@@ -643,6 +657,7 @@ function loginPage({ error, notice, next, lang = "zh", req }) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <title>dsh-vps · ${L("登录", "Sign in")}</title>
+${HOME_SCREEN_TAGS}
 <style>
 :root{color-scheme:dark}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -659,6 +674,8 @@ color:#fff;font-size:15px;cursor:pointer}
 button:hover{background:#1d4fd8}
 .err{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#2a1215;color:#f87171;font-size:13px}
 .notice{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#101c2e;color:#93c5fd;font-size:13px}
+.remember{display:flex;align-items:center;gap:8px;margin:14px 0 0;font-size:13px;color:#9aa7b8;cursor:pointer}
+.remember input{width:auto;margin:0;accent-color:#2563eb}
 ${REPO_CSS}
 ${LANG_CSS}
 </style>
@@ -676,6 +693,7 @@ ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 <input id="u" name="username" autocomplete="username" required>
 <label for="p">${L("密码", "Password")}</label>
 <input id="p" name="password" type="password" autocomplete="current-password" required>
+<label class="remember"><input type="checkbox" name="remember" value="1" checked> ${L("保持登录（30 天）", "Keep me signed in (30 days)")}</label>
 <button type="submit">${L("登录", "Sign in")}</button>
 </form>
 ${repoLink()}
@@ -754,7 +772,7 @@ async function handleLogin(req, res) {
 	log(`login ok from ${ip} (${username})`);
 	res.writeHead(303, {
 		location: next,
-		"set-cookie": sessionCookieHeader(req, admin),
+		"set-cookie": sessionCookieHeader(req, admin, form.get("remember") === "1"),
 		"cache-control": "no-store",
 	});
 	res.end();
@@ -933,6 +951,7 @@ function collectAndInject(upRes, res, status, respHeaders) {
 		const missing = [];
 		if (!body.includes(OWNS_HOST_MARK)) missing.push(OWNS_HOST_SNIPPET);
 		if (!body.includes(UI_MARK)) missing.push(UI_SNIPPET);
+		if (!body.includes(ICON_MARK)) missing.push(HOME_SCREEN_TAGS);
 		if (missing.length) {
 			// 只有完整的 HTML 文档才改写；找不到 <head> 说明不是文档（片段/JSON 误标），原样转发
 			const at = body.search(/<head\b[^>]*>/i);
@@ -1948,6 +1967,19 @@ const UI_JS = `(function () {
 })();
 `;
 
+/** 手机桌面图标；文件不在时 404（iPhone 退回用页面截图） */
+function handleAppleTouchIcon(req, res) {
+	let png;
+	try {
+		png = fs.readFileSync(APPLE_TOUCH_ICON);
+	} catch {
+		sendText(res, 404, "not found");
+		return;
+	}
+	res.writeHead(200, { "content-type": "image/png", "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" });
+	res.end(req.method === "HEAD" ? void 0 : png);
+}
+
 function handleUiJs(req, res) {
 	res.writeHead(200, {
 		"content-type": "text/javascript; charset=utf-8",
@@ -2045,6 +2077,7 @@ function main() {
 				if (pathname === "/gate/health") return handleHealthGuarded(req, res);
 				if (pathname === "/gate/selfcheck") return handleSelfcheckGuarded(req, res);
 				if (pathname === "/gate/ui.js") return handleUiJs(req, res);
+				if (pathname === "/gate/apple-touch-icon.png") return handleAppleTouchIcon(req, res);
 				if (pathname === "/setup") return handleSetup(req, res);
 				if (!loadAdmin()) {
 					// 尚未完成初始设置：浏览器导航导向导，/api 保持 401
