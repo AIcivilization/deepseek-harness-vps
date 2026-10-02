@@ -2674,6 +2674,89 @@ window.__ModuleLoader__.load({
         health.lastError ? h('div', { style: S.err }, health.lastError) : null)
     }
 
+    /** 管理员账号：平时一行；点「修改密码」展开表单（要当前密码） */
+    function AccountCard({ health }) {
+      const [open, setOpen] = useState(false)
+      const [form, setForm] = useState({ current: '', next: '', confirm: '' })
+      const [busy, setBusy] = useState(false)
+      const [error, setError] = useState(null)
+      const [done, setDone] = useState(false)
+      const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
+      const close = () => {
+        setOpen(false)
+        setForm({ current: '', next: '', confirm: '' })
+        setError(null)
+      }
+      const messages = {
+        wrong_current: t('当前密码不对。', 'The current password is wrong.'),
+        too_short: t('新密码至少 12 位。', 'The new password needs at least 12 characters.'),
+        too_long: t('新密码太长。', 'The new password is too long.'),
+        same_as_current: t('新密码和当前密码一样。', 'The new password is the same as the current one.'),
+        rate_limited: t('尝试次数过多，请稍后再试。', 'Too many attempts. Try again later.'),
+        admin_changed: t('管理员账号已在别处变更，请刷新页面。', 'The admin account changed elsewhere; reload the page.'),
+      }
+
+      async function submit(e) {
+        e.preventDefault()
+        setError(null)
+        if (form.next.length < 12) return setError(messages.too_short)
+        if (form.next !== form.confirm) return setError(t('两次输入的新密码不一致。', 'The two new passwords do not match.'))
+        setBusy(true)
+        try {
+          const res = await fetch('/gate/password', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ current: form.current, next: form.next }),
+            signal: AbortSignal.timeout(20_000),
+          })
+          let body = {}
+          try {
+            body = await res.json()
+          } catch {
+            // 非 JSON
+          }
+          if (!res.ok) throw new Error(messages[body.error] || body.error || `HTTP ${res.status}`)
+          close()
+          setDone(true)
+        } catch (err) {
+          setError(String(err.message || err))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const input = (key, label, auto) => h('label', { style: { display: 'block', flex: '1 1 160px', minWidth: 0 } },
+        h('div', { style: { fontSize: 12, opacity: 0.75, marginBottom: 3 } }, label),
+        h('input', {
+          type: 'password', value: form[key], onChange: set(key), autoComplete: auto,
+          style: { width: '100%', boxSizing: 'border-box', border: line, borderRadius: 6, padding: '6px 8px', background: 'transparent', color: 'inherit', fontSize: 13 },
+        }))
+
+      return h('div', { style: S.card },
+        h('div', { style: S.spread },
+          h('div', null,
+            h('span', { style: S.h2 }, t('账号', 'Account')),
+            h('span', { style: { ...S.muted, marginLeft: 10 } }, t('管理员：', 'Admin: '), h('span', { style: S.code }, health?.admin || '—'))),
+          open ? null : h('button', { type: 'button', style: S.btn(), onClick: () => { setOpen(true); setDone(false) } }, t('修改密码', 'Change password'))),
+        done ? h('div', { style: S.note }, t('密码已修改。这台设备保持登录；其他设备（包括手机）上的登录已失效，需要用新密码重新登录。',
+          'Password changed. This device stays signed in; every other device (phones included) is signed out and needs the new password.')) : null,
+        open
+          ? h('form', { onSubmit: submit, style: { marginTop: 8 } },
+            h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 10 } },
+              input('current', t('当前密码', 'Current password'), 'current-password'),
+              input('next', t('新密码（至少 12 位）', 'New password (12+ characters)'), 'new-password'),
+              input('confirm', t('确认新密码', 'Confirm new password'), 'new-password')),
+            h('div', { style: { ...S.muted, fontSize: 12, marginTop: 6 } },
+              t('修改后，其他设备上的登录会全部失效。忘了当前密码：在服务器上执行 sudo dsh-vps reset-admin 重新设置。',
+                'Changing it signs out every other device. Forgot the current password? Run sudo dsh-vps reset-admin on the server.')),
+            error ? h('div', { style: S.err }, error) : null,
+            h('div', { style: { ...S.row, marginTop: 10 } },
+              h('button', { type: 'submit', style: S.btn('primary', busy), disabled: busy }, busy ? t('保存中…', 'Saving…') : t('保存新密码', 'Save new password')),
+              h('button', { type: 'button', style: S.btn(), onClick: close }, t('取消', 'Cancel'))))
+          : null)
+    }
+
     function CommandsCard() {
       const rows = [
         ['sudo dsh-vps status', t('服务状态、版本、健康检查', 'services, versions and health')],
@@ -3002,6 +3085,7 @@ window.__ModuleLoader__.load({
             h(VersionCard, { info, reload: setInfo }),
             h(HomeScreenCard, { health }),
             h(GatewayCard, { health }),
+            h(AccountCard, { health }),
             h(CommandsCard))
           : h('div', { style: S.card },
             tab === 'uninstall' ? h(UninstallIntro) : h(InstallIntro, { deployed }),

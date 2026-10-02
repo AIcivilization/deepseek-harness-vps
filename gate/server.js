@@ -823,6 +823,8 @@ function handleHealth(req, res) {
 			gate: "ok",
 			uptimeSec: Math.round(process.uptime()),
 			adminConfigured: loadAdmin() !== void 0,
+			// 已登录的页面（设置 → VPS 部署）显示「管理员：xxx」用
+			admin: sessionUser(req) || void 0,
 			dsh: {
 				alive: dsh.child !== null,
 				pid: dsh.child ? dsh.child.pid : null,
@@ -1343,6 +1345,52 @@ async function applyDomainChange(domain) {
 	dshTrustedHost = domain;
 	persistTrustedHost(domain);
 	restartDsh(`trusted host changed to ${domain}`);
+}
+
+/**
+ * 设置页「修改密码」：必须给出正确的当前密码；输错计入登录失败限流（不能拿这里试密码）。
+ * 改完换新盐 → 所有旧会话立即作废；只给发起修改的这台设备换发新会话，其他设备需重新登录。
+ * 返回错误码而非文案，由界面按 DSH 语言显示。
+ */
+async function handlePassword(req, res, user) {
+	const json = (status, body, headers) => {
+		res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers });
+		res.end(JSON.stringify(body));
+	};
+	if (req.method !== "POST") return json(405, { error: "method_not_allowed" });
+	const origin = req.headers.origin;
+	let sameOrigin = false;
+	try {
+		sameOrigin = origin !== void 0 && new URL(origin).host === requestAuthority(req.headers);
+	} catch {
+		/* 非法 Origin */
+	}
+	if (!sameOrigin || String(req.headers["sec-fetch-site"] || "") === "cross-site") return json(403, { error: "cross_origin" });
+	const ip = clientIp(req);
+	if (loginRateLimited(ip)) return json(429, { error: "rate_limited" });
+	let body;
+	try {
+		body = JSON.parse(await readBody(req, 16 * 1024));
+	} catch {
+		return json(400, { error: "bad_request" });
+	}
+	const current = typeof body?.current === "string" ? body.current : "";
+	const next = typeof body?.next === "string" ? body.next : "";
+	const admin = loadAdmin();
+	if (!admin || admin.username !== user) return json(409, { error: "admin_changed" });
+	if (!verifyAdmin(admin, admin.username, current)) {
+		recordLoginFailure(ip);
+		log(`password change rejected (wrong current password) from ${ip} for ${JSON.stringify(user)}`);
+		return json(400, { error: "wrong_current" });
+	}
+	if (next.length < 12) return json(400, { error: "too_short" });
+	if (next.length > 1024) return json(400, { error: "too_long" });
+	if (next === current) return json(400, { error: "same_as_current" });
+	clearLoginFailures(ip);
+	writeAdminRecord(admin.username, next);
+	log(`admin password changed from ${ip} (${admin.username}); all other sessions revoked`);
+	// 新盐已生效：给这台设备换发会话，免得改完密码自己也被踢出去
+	return json(200, { ok: true }, { "set-cookie": sessionCookieHeader(req, loadAdmin(), true) });
 }
 
 function writeAdminRecord(username, password) {
@@ -2096,6 +2144,7 @@ function main() {
 					return;
 				}
 				if (pathname === "/gate/update") return handleUpdate(req, res, user);
+				if (pathname === "/gate/password") return handlePassword(req, res, user);
 				if (pathname.startsWith(MARKET_PREFIX) && !marketRequestSameOrigin(req)) {
 					sendText(res, 403, "cross-origin market request refused by gate");
 					return;
