@@ -1784,14 +1784,21 @@ async function handleUpdate(req, res, user) {
 
 // 注入 DSH 页面的升级提示条（同源脚本，无外部依赖）。
 // 只做提示与确认；真正的升级由 root 服务执行，失败会自动回滚。
+// 语言跟随 DSH「设置 → 通用 → 语言」：DSH 把当前语言同步到 <html lang>（中文为 zh-CN），
+// 这里读它，并监听它的变化——DSH 晚于提示条完成语言初始化、或用户切换语言时，提示条随之重画。
 const UI_JS = `(function () {
 	if (window.top !== window || document.getElementById("dshvps-update")) return;
 	var KEY = "dshvps-update-dismissed";
+	function L(cn, en) { var l = String(document.documentElement.getAttribute("lang") || "").toLowerCase(); return l.indexOf("zh") === 0 ? cn : en; }
 	function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
-	var box, timer, busy = false, asked = false;
+	var box, timer, view = null, busy = false, asked = false;
 	function el(tag, css, text) { var n = document.createElement(tag); if (css) n.style.cssText = css; if (text) n.textContent = text; return n; }
 	var BTN = "margin-left:8px;padding:5px 12px;border-radius:7px;border:1px solid #2a3547;cursor:pointer;font:inherit;";
-	function render(msg, actions) {
+	// view 是一个返回 [文案, 按钮] 的函数：语言变了只需重新调用它
+	function show(fn) { view = fn; paint(); }
+	function paint() {
+		if (!view) return;
+		var v = view(), msg = v[0], actions = v[1];
 		if (!box) {
 			box = el("div", "position:fixed;right:16px;bottom:16px;z-index:2147483647;max-width:min(420px,calc(100vw - 32px));" +
 				"padding:12px 14px;border-radius:10px;background:#11161f;color:#dbe2ea;border:1px solid #2a3547;" +
@@ -1811,44 +1818,49 @@ const UI_JS = `(function () {
 			box.appendChild(row);
 		}
 	}
-	function hide() { if (box) { box.remove(); box = null; } }
+	function hide() { view = null; if (box) { box.remove(); box = null; } }
+	try { new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] }); } catch (e) {}
 	function get() { return fetch("/gate/update", { cache: "no-store", credentials: "same-origin" }).then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }); }
 	function poll() {
 		get().then(function (u) {
 			var st = u.status;
 			if (u.requested || (st && st.state === "running")) {
-				render("正在升级 DeepSeek Harness" + (u.latest ? " 到 " + u.latest : "") + "…（约 1–3 分钟，期间页面会短暂不可用，请勿关闭）");
+				show(function () { return [L("正在升级 DeepSeek Harness" + (u.latest ? " 到 " + u.latest : "") + "…（约 1–3 分钟，期间页面会短暂不可用，请勿关闭）",
+					"Upgrading DeepSeek Harness" + (u.latest ? " to " + u.latest : "") + "… (about 1–3 minutes; the page is briefly unavailable — keep it open)")]; });
 				return;
 			}
 			if (st && asked && st.state === "success") {
-				render("升级完成（" + st.from + " → " + st.to + "），正在刷新…");
+				show(function () { return [L("升级完成（" + st.from + " → " + st.to + "），正在刷新…", "Upgrade complete (" + st.from + " → " + st.to + "), reloading…")]; });
 				clearInterval(timer);
 				setTimeout(function () { location.reload(); }, 1500);
 				return;
 			}
 			if (st && asked && st.state === "failed") {
 				clearInterval(timer);
-				render("升级未成功，已自动回滚到 " + (st.to || st.from) + "，当前可继续使用。详情：sudo cat /opt/dsh-vps/state/upgrade.log", [{ label: "知道了", onClick: hide }]);
+				show(function () { return [L("升级未成功，已自动回滚到 " + (st.to || st.from) + "，当前可继续使用。详情：sudo cat /opt/dsh-vps/state/upgrade.log",
+					"The upgrade did not succeed and was rolled back to " + (st.to || st.from) + "; DSH works normally. Details: sudo cat /opt/dsh-vps/state/upgrade.log"),
+					[{ label: L("知道了", "OK"), onClick: hide }]]; });
 				return;
 			}
 		}).catch(function () {
-			if (asked) render("正在升级，DeepSeek Harness 重启中…");
+			if (asked) show(function () { return [L("正在升级，DeepSeek Harness 重启中…", "Upgrading — DeepSeek Harness is restarting…")]; });
 		});
 	}
 	function start() {
 		if (busy) return;
-		if (!window.confirm("升级期间 DeepSeek Harness 会重启，约 1–3 分钟不可用。\\n升级前自动备份；新版本自检不通过会自动回滚到当前版本。\\n\\n确认升级？")) return;
+		if (!window.confirm(L("升级期间 DeepSeek Harness 会重启，约 1–3 分钟不可用。\\\\n升级前自动备份；新版本自检不通过会自动回滚到当前版本。\\\\n\\\\n确认升级？",
+			"DeepSeek Harness restarts during the upgrade and is unavailable for about 1–3 minutes.\\\\nA backup is taken first; if the new version fails its self-check, it rolls back automatically.\\\\n\\\\nUpgrade now?"))) return;
 		busy = true;
 		fetch("/gate/update", { method: "POST", credentials: "same-origin" }).then(function (r) {
 			return r.json().then(function (b) { if (!r.ok) throw new Error(b.error || String(r.status)); return b; });
 		}).then(function () {
 			asked = true;
 			store("dshvps-update-asked", String(Date.now()));
-			render("已提交升级请求，等待开始…");
+			show(function () { return [L("已提交升级请求，等待开始…", "Upgrade requested, waiting for it to start…")]; });
 			timer = setInterval(poll, 3000);
 		}).catch(function (e) {
 			busy = false;
-			render("无法开始升级：" + e.message, [{ label: "关闭", onClick: hide }]);
+			show(function () { return [L("无法开始升级：", "Could not start the upgrade: ") + e.message, [{ label: L("关闭", "Close"), onClick: hide }]]; });
 		});
 	}
 	function init() {
@@ -1860,10 +1872,10 @@ const UI_JS = `(function () {
 			if (u.requested || (st && st.state === "running")) { asked = true; timer = setInterval(poll, 3000); poll(); return; }
 			if (asked && st && st.at > t) { store("dshvps-update-asked", "0"); if (st.state === "failed") poll(); return; }
 			if (!u.available || store(KEY) === u.latest) return;
-			render("DeepSeek Harness 有新版本 " + u.latest + "（当前 " + u.current + "）", [
-				{ label: "稍后", onClick: function () { store(KEY, u.latest); hide(); } },
-				{ label: "立即升级", primary: true, onClick: start },
-			]);
+			show(function () { return [L("DeepSeek Harness 有新版本 " + u.latest + "（当前 " + u.current + "）", "A new DeepSeek Harness version is available: " + u.latest + " (current " + u.current + ")"), [
+				{ label: L("稍后", "Later"), onClick: function () { store(KEY, u.latest); hide(); } },
+				{ label: L("立即升级", "Upgrade now"), primary: true, onClick: start },
+			]]; });
 		}).catch(function () {});
 	}
 	if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

@@ -26,15 +26,36 @@ window.__ModuleLoader__.load({
 
     // ——————————————————————— 文案 ———————————————————————
 
-    // DSH 页面的 <html lang> 恒为 en，不能用来判断；按浏览器语言走
-    const zh = (() => {
+    // 跟随 DSH「设置 → 通用 → 语言」：交给 DSH 的语言服务按当前语言的回退链挑文案
+    // （与 DSH 自身同一规则——中文及回退到中文的语言包显示中文，其余显示英文）。
+    // 语言服务不可用（旧版 DSH）时按浏览器语言兜底。
+    let localeSvc = null
+    const browserZh = (() => {
       try {
         return /^zh/i.test(navigator.language || '')
       } catch {
         return true
       }
     })()
-    const t = (cn, en) => (zh ? cn : en)
+    const t = (cn, en) => {
+      if (localeSvc && typeof localeSvc.resolveText === 'function') {
+        try {
+          return localeSvc.resolveText({ zh: cn, en })
+        } catch {
+          // 退回兜底
+        }
+      }
+      return browserZh ? cn : en
+    }
+    /** 语言切换时让界面重渲染（DSH 的 LocaleFace：subscribe + getSnapshot().revision） */
+    const noopSubscribe = () => () => {}
+    function useLocaleRevision() {
+      const ok = localeSvc && typeof localeSvc.subscribe === 'function' && typeof localeSvc.getSnapshot === 'function'
+      return React.useSyncExternalStore(
+        ok ? (fn) => localeSvc.subscribe(fn) : noopSubscribe,
+        ok ? () => localeSvc.getSnapshot().revision : () => 0,
+      )
+    }
 
     // ——————————————————————— 样式（跟随 DSH 主题变量） ———————————————————————
 
@@ -589,6 +610,7 @@ window.__ModuleLoader__.load({
     // ——————————————————————— 设置页 ———————————————————————
 
     function SettingsSection() {
+      useLocaleRevision() // DSH 里切换语言：整页随之重渲染
       const [where, setWhere] = useState('loading') // loading | deployed | standalone
       const [tab, setTab] = useState(null)
       const [info, setInfo] = useState(null)
@@ -646,9 +668,14 @@ window.__ModuleLoader__.load({
     // ——————————————————————— 注册 ———————————————————————
 
     const name = 'dsh-vps-client'
-    const inject = ['slots']
+    const inject = ['slots', 'locale']
 
     function apply(ctx) {
+      try {
+        localeSvc = ctx.locale ?? null
+      } catch {
+        localeSvc = null
+      }
       try {
         ctx.slots.inject('settings.section', () =>
           ctx.slots.register({ name: 'settings.section', id: 'dsh-vps', order: 35, label: () => t('VPS 部署', 'VPS Deploy') }, SettingsSection))

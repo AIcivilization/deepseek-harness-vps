@@ -189,7 +189,7 @@ Skipping the API key is fine; you can add it later via the "Add API key" prompt 
 
 The plugins install in the background (tens of seconds), always at their latest npm version, and DSH restarts to activate them. Three of them:
 
-- **dsh-vps** (this project, required): the **Settings → VPS Deploy** page in DSH with three tabs — "This server" (DSH version with one-click upgrade, gateway status and access mode, common server commands), "Install on a VPS" and "Uninstall from a VPS" (install DSH on, or remove it from, another VPS over SSH). In the DSH on your own computer it shows only the last two
+- **dsh-vps** (this project, required): the **Settings → VPS Deploy** page in DSH with three tabs — "This server" (DSH version with one-click upgrade, gateway status and access mode, common server commands), "Install on a VPS" and "Uninstall from a VPS" (install DSH on, or remove it from, another VPS over SSH). In the DSH on your own computer it shows only the last two. The page follows the language chosen in DSH under Settings → General → Language (DSH currently ships Chinese and English) and switches instantly; so does the in-page upgrade prompt
 
 - **dsh-market**: browse, search and install community plugins and themes from Settings. Everything else is left to you — add whatever you want from the marketplace afterwards
 - **dsh-vps-manager**: manage this very VPS from inside DSH — `/vps-` queries that skip the model and cost no tokens, a terminal in the conversation, AI operations confirmed by risk level, and a recipe library. Add this machine under Settings → VPS Manager (SSH key login)
