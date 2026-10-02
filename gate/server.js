@@ -50,9 +50,9 @@ const DEEPSEEK_KEY_REF = "DEEPSEEK_API_KEY"; // DSH 约定：deriveKeyRef("deeps
 // /setup 向导可选的常用插件（package 名即 `dsh plugin --profile web add <pkg>` 的入参）
 const PLUGIN_OPTIONS = [
 	// required：本产品自己的设置页（版本与一键升级、网关状态、安装/卸载到 VPS），必装，向导里勾选且不可取消
-	{ id: "dsh-vps", pkg: "dsh-vps", name: "VPS 部署 dsh-vps（必装）", desc: "本产品的设置页「设置 → VPS 部署」：DSH 版本与一键升级、网关状态，以及把 DSH 安装到 / 卸载出其他 VPS", required: true },
-	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题，之后想装什么都在这里装" },
-	{ id: "dsh-vps-manager", pkg: "dsh-vps-manager", name: "VPS 管理 dsh-vps-manager", desc: "在 DSH 里直接管理这台 VPS：不花 token 的查询命令、对话内终端、按风险分级确认的 AI 操作、运维菜谱库" },
+	{ id: "dsh-vps", pkg: "dsh-vps", name: "VPS 部署 dsh-vps（必装）", nameEn: "VPS Deploy dsh-vps (required)", desc: "本产品的设置页「设置 → VPS 部署」：DSH 版本与一键升级、网关状态，以及把 DSH 安装到 / 卸载出其他 VPS", descEn: "This project's settings page, Settings → VPS Deploy: DSH version and one-click upgrade, gateway status, and installing DSH on / removing it from other VPSs", required: true },
+	{ id: "dshmarket", pkg: "dshmarket", name: "插件市场 dsh-market", nameEn: "Plugin market dsh-market", desc: "设置页内浏览/搜索/一键安装社区插件与主题，之后想装什么都在这里装", descEn: "Browse, search and install community plugins and themes from Settings — install anything else from here later" },
+	{ id: "dsh-vps-manager", pkg: "dsh-vps-manager", name: "VPS 管理 dsh-vps-manager", nameEn: "VPS manager dsh-vps-manager", desc: "在 DSH 里直接管理这台 VPS：不花 token 的查询命令、对话内终端、按风险分级确认的 AI 操作、运维菜谱库", descEn: "Manage this VPS from inside DSH: token-free query commands, an in-conversation terminal, risk-graded AI operations and a recipe library" },
 ];
 // pnpm 12 起默认带约 1 天的发布冷却期（minimumReleaseAge），`pnpm add <pkg>` 会装到一天前的旧版。
 // 插件作者修 bug 后用户就该拿到修复，这里关掉冷却期：预装与插件市场安装都取真正的最新版。
@@ -231,6 +231,50 @@ function sendHtml(res, status, html, extraHeaders) {
 	});
 	res.end(html);
 }
+
+//#region 语言（网关自己的页面：登录、向导、等待页）
+//
+// 这些页面在进入 DSH 之前，读不到 DSH 的语言设置：先看 Cookie 里用户手动选过的语言，
+// 再看浏览器 Accept-Language（中文显示中文，其余英文）。页面右上角可手动切换。
+
+const LANG_COOKIE = "dshvps_lang";
+
+/** 本次请求用的语言：zh 或 en */
+function requestLang(req) {
+	const chosen = parseCookies(req.headers.cookie)[LANG_COOKIE];
+	if (chosen === "zh" || chosen === "en") return chosen;
+	const ranges = String(req.headers["accept-language"] || "")
+		.split(",")
+		.map((part) => {
+			const [tag, ...params] = part.trim().split(";");
+			const q = params.map((x) => x.trim()).find((x) => x.startsWith("q="));
+			return { tag: tag.trim().toLowerCase(), q: q ? Number(q.slice(2)) : 1 };
+		})
+		.filter((r) => r.tag && r.q > 0)
+		.sort((a, b) => b.q - a.q);
+	for (const r of ranges) {
+		if (r.tag.startsWith("zh")) return "zh";
+		if (r.tag !== "*") return "en";
+	}
+	return "en";
+}
+
+/** 按语言挑文案：L("中文", "English") */
+function translator(lang) {
+	return (zh, en) => (lang === "zh" ? zh : en);
+}
+
+/** 右上角「English / 中文」切换：带上当前地址的其余参数（向导链接里的令牌要保留） */
+function langSwitch(req, lang) {
+	const url = new URL(req.url || "/", "http://x");
+	url.searchParams.set("lang", lang === "zh" ? "en" : "zh");
+	const label = lang === "zh" ? "English" : "中文";
+	return `<a class="lang" href="${esc(url.pathname + url.search)}">${label}</a>`;
+}
+
+const LANG_CSS = ".lang{position:fixed;top:14px;right:18px;color:#7d8a9c;font-size:13px;text-decoration:none}.lang:hover{color:#93c5fd}";
+
+//#endregion
 
 function sendText(res, status, text) {
 	res.writeHead(status, {
@@ -590,14 +634,15 @@ function upstreamCookieHeader(clientCookieHeader, authority) {
 
 //#region 登录页
 
-function loginPage({ error, notice, next }) {
+function loginPage({ error, notice, next, lang = "zh", req }) {
+	const L = translator(lang);
 	return `<!doctype html>
-<html lang="zh">
+<html lang="${lang === "zh" ? "zh-CN" : "en"}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>dsh-vps · 登录</title>
+<title>dsh-vps · ${L("登录", "Sign in")}</title>
 <style>
 :root{color-scheme:dark}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -615,21 +660,23 @@ button:hover{background:#1d4fd8}
 .err{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#2a1215;color:#f87171;font-size:13px}
 .notice{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#101c2e;color:#93c5fd;font-size:13px}
 ${REPO_CSS}
+${LANG_CSS}
 </style>
 </head>
 <body>
+${req ? langSwitch(req, lang) : ""}
 <main>
 <h1>dsh-vps</h1>
-<p class="sub">DeepSeek Harness 登录门</p>
+<p class="sub">${L("DeepSeek Harness 登录门", "DeepSeek Harness sign-in")}</p>
 ${error ? `<p class="err">${esc(error)}</p>` : ""}
 ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
 <form method="post" action="/login">
 <input type="hidden" name="next" value="${esc(next || "/")}">
-<label for="u">用户名</label>
+<label for="u">${L("用户名", "Username")}</label>
 <input id="u" name="username" autocomplete="username" required>
-<label for="p">密码</label>
+<label for="p">${L("密码", "Password")}</label>
 <input id="p" name="password" type="password" autocomplete="current-password" required>
-<button type="submit">登录</button>
+<button type="submit">${L("登录", "Sign in")}</button>
 </form>
 ${repoLink()}
 </main>
@@ -670,10 +717,12 @@ function clientIp(req) {
 
 async function handleLogin(req, res) {
 	const admin = loadAdmin();
+	const lang = requestLang(req);
+	const L = translator(lang);
 	if (req.method === "GET" || req.method === "HEAD") {
 		const next = safeNext(new URL(req.url, "http://x").searchParams.get("next"));
-		const notice = admin ? void 0 : "尚未配置管理员：请先完成初始设置向导，或运行 `dsh-vps reset-admin`。";
-		sendHtml(res, 200, loginPage({ notice, next }));
+		const notice = admin ? void 0 : L("尚未配置管理员：请先完成初始设置向导，或运行 `dsh-vps reset-admin`。", "No admin account yet: finish the setup wizard first, or run `dsh-vps reset-admin`.");
+		sendHtml(res, 200, loginPage({ notice, next, lang, req }));
 		return;
 	}
 	if (req.method !== "POST") {
@@ -682,7 +731,7 @@ async function handleLogin(req, res) {
 	}
 	const ip = clientIp(req);
 	if (loginRateLimited(ip)) {
-		sendHtml(res, 429, loginPage({ error: "尝试次数过多，请稍后再试。", next: "/" }));
+		sendHtml(res, 429, loginPage({ error: L("尝试次数过多，请稍后再试。", "Too many attempts. Try again later."), next: "/", lang, req }));
 		return;
 	}
 	let form;
@@ -698,7 +747,7 @@ async function handleLogin(req, res) {
 	if (!admin || !verifyAdmin(admin, username, password)) {
 		recordLoginFailure(ip);
 		log(`login failure from ${ip} for ${JSON.stringify(username)}`);
-		sendHtml(res, 200, loginPage({ error: "用户名或密码错误。", next }));
+		sendHtml(res, 200, loginPage({ error: L("用户名或密码错误。", "Wrong username or password."), next, lang, req }));
 		return;
 	}
 	clearLoginFailures(ip);
@@ -781,34 +830,38 @@ function handleHealth(req, res) {
  * 页面自己轮询 /gate/health，一旦会话就绪立即刷新；同时把阻塞原因直接摆在页面上，
  * 免得用户只能去翻 journalctl。
  */
-function sendDshNotReady(res) {
-	const state = notReadyState();
+function sendDshNotReady(res, lang = "zh") {
+	const L = translator(lang);
+	const state = notReadyState(lang);
+	// 轮询脚本里用的文案（随语言注入，避免脚本里再写两套）
+	const W = { alive: L("运行中", "running"), dead: L("未运行", "not running"), tok: L("已捕获", "captured"), notok: L("未捕获", "not captured"), ck: L("已就绪", "ready"), nock: L("等待兑换", "waiting") };
 	sendHtml(
 		res,
 		503,
-		`<!doctype html><meta charset="utf-8"><title>503 DeepSeek Harness 启动中</title>
+		`<!doctype html><html lang="${lang === "zh" ? "zh-CN" : "en"}"><meta charset="utf-8"><title>503 ${L("DeepSeek Harness 启动中", "DeepSeek Harness is starting")}</title>
 <meta name="robots" content="noindex">
 <body style="background:#0b0e14;color:#dbe2ea;font:15px/1.7 system-ui,-apple-system,'Segoe UI',sans-serif;padding:40px;max-width:760px">
-<h2 style="margin:0 0 4px">DeepSeek Harness 正在启动</h2>
-<p style="color:#7d8a9c;margin:0 0 20px">gate 还没拿到 DSH 会话；本页每 3 秒自动检查一次，就绪后会自动刷新。</p>
+<h2 style="margin:0 0 4px">${L("DeepSeek Harness 正在启动", "DeepSeek Harness is starting")}</h2>
+<p style="color:#7d8a9c;margin:0 0 20px">${L("gate 还没拿到 DSH 会话；本页每 3 秒自动检查一次，就绪后会自动刷新。", "The gateway has no DSH session yet. This page checks every 3 seconds and reloads as soon as it is ready.")}</p>
 <table style="border-collapse:collapse;font-size:14px">
-<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">DSH 子进程</td><td id="s-alive">${state.childAlive ? "运行中" : "未运行"}</td></tr>
-<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">launchToken</td><td id="s-token">${state.tokenCaptured ? "已捕获" : "未捕获"}</td></tr>
-<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">会话 Cookie</td><td id="s-cookie">${state.cookieReady ? "已就绪" : "等待兑换"}</td></tr>
+<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">${L("DSH 子进程", "DSH process")}</td><td id="s-alive">${state.childAlive ? W.alive : W.dead}</td></tr>
+<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">launchToken</td><td id="s-token">${state.tokenCaptured ? W.tok : W.notok}</td></tr>
+<tr><td style="padding:3px 16px 3px 0;color:#9aa7b8">${L("会话 Cookie", "Session cookie")}</td><td id="s-cookie">${state.cookieReady ? W.ck : W.nock}</td></tr>
 </table>
 <p id="s-err" style="margin:16px 0 0;padding:10px 12px;border-radius:8px;background:#2a2112;color:#fbbf24;font-size:13px;${state.error ? "" : "display:none"}">${esc(state.error || "")}</p>
-<p id="s-wait" style="color:#7d8a9c;font-size:13px;margin:16px 0 0">已等待 <span id="s-sec">0</span> 秒… <button onclick="location.reload()" style="margin-left:8px;padding:4px 10px;border:1px solid #2a3547;border-radius:6px;background:#0d1219;color:#dbe2ea;cursor:pointer">立即刷新</button></p>
-<p style="color:#5c6b7e;font-size:12px;margin:20px 0 0">超过 2 分钟仍未就绪，多半是 3080 端口被残留进程占用或 DSH 启动失败：<code>journalctl -u dsh-gate -n 100</code>，然后 <code>systemctl restart dsh-gate</code>。</p>
+<p id="s-wait" style="color:#7d8a9c;font-size:13px;margin:16px 0 0">${L("已等待", "Waited")} <span id="s-sec">0</span> ${L("秒…", "s…")} <button onclick="location.reload()" style="margin-left:8px;padding:4px 10px;border:1px solid #2a3547;border-radius:6px;background:#0d1219;color:#dbe2ea;cursor:pointer">${L("立即刷新", "Reload now")}</button></p>
+<p style="color:#5c6b7e;font-size:12px;margin:20px 0 0">${L("超过 2 分钟仍未就绪，多半是 3080 端口被残留进程占用或 DSH 启动失败：", "Still not ready after 2 minutes? Port 3080 is probably held by a leftover process, or DSH failed to start: ")}<code>journalctl -u dsh-gate -n 100</code>${L("，然后 ", ", then ")}<code>systemctl restart dsh-gate</code>${L("。", ".")}</p>
 ${repoLinkInline()}
 <script>
+var W=${JSON.stringify(W)};
 var t0=Date.now();
 setInterval(function(){document.getElementById('s-sec').textContent=Math.round((Date.now()-t0)/1000)},1000);
 setInterval(function(){
   fetch('/gate/health',{cache:'no-store'}).then(function(r){return r.json()}).then(function(h){
     var alive=h.dsh&&h.dsh.alive, tok=h.launchTokenCaptured, ck=!!h.dshCookie;
-    document.getElementById('s-alive').textContent=alive?'运行中':'未运行';
-    document.getElementById('s-token').textContent=tok?'已捕获':'未捕获';
-    document.getElementById('s-cookie').textContent=ck?'已就绪':'等待兑换';
+    document.getElementById('s-alive').textContent=alive?W.alive:W.dead;
+    document.getElementById('s-token').textContent=tok?W.tok:W.notok;
+    document.getElementById('s-cookie').textContent=ck?W.ck:W.nock;
     var err=(h.dsh&&h.dsh.lastError)||h.lastExchangeError||'';
     var box=document.getElementById('s-err');
     if(err){box.style.display='';box.textContent=err}else{box.style.display='none'}
@@ -820,8 +873,9 @@ setInterval(function(){
 	);
 }
 
-function notReadyState() {
-	const error = dsh.lastError || dsh.lastExchangeError || (dsh.lastExit ? `DSH 已退出 (code=${dsh.lastExit.code} signal=${dsh.lastExit.signal})，即将自动重启` : null);
+function notReadyState(lang = "zh") {
+	const L = translator(lang);
+	const error = dsh.lastError || dsh.lastExchangeError || (dsh.lastExit ? L(`DSH 已退出 (code=${dsh.lastExit.code} signal=${dsh.lastExit.signal})，即将自动重启`, `DSH exited (code=${dsh.lastExit.code} signal=${dsh.lastExit.signal}); restarting automatically`) : null);
 	return {
 		childAlive: dsh.child !== null,
 		tokenCaptured: dsh.token !== null,
@@ -830,15 +884,16 @@ function notReadyState() {
 	};
 }
 
-function sendBadGateway(res) {
+function sendBadGateway(res, lang = "zh") {
+	const L = translator(lang);
 	sendHtml(
 		res,
 		502,
-		`<!doctype html><meta charset="utf-8"><title>502</title>
+		`<!doctype html><html lang="${lang === "zh" ? "zh-CN" : "en"}"><meta charset="utf-8"><title>502</title>
 <body style="background:#0b0e14;color:#dbe2ea;font:15px system-ui;padding:40px">
-<h2>无法连接 DeepSeek Harness</h2>
-<p>DSH 后端（127.0.0.1:${DSH_PORT}）不可达。</p>
-<p style="color:#7d8a9c">排障：journalctl -u dsh-gate -n 50</p></body>`,
+<h2>${L("无法连接 DeepSeek Harness", "Cannot reach DeepSeek Harness")}</h2>
+<p>${L(`DSH 后端（127.0.0.1:${DSH_PORT}）不可达。`, `The DSH backend (127.0.0.1:${DSH_PORT}) is unreachable.`)}</p>
+<p style="color:#7d8a9c">${L("排障：", "Troubleshoot: ")}journalctl -u dsh-gate -n 50</p></body>`,
 	);
 }
 
@@ -900,7 +955,7 @@ function collectAndInject(upRes, res, status, respHeaders) {
 /** 透明代理：Host 原样透传，重建 Cookie（剥离 dsh-auth-* → 注入服务端 DSH Cookie），剥掉 /?token=。 */
 function proxyHttp(req, res) {
 	if (!dsh.cookie) {
-		sendDshNotReady(res);
+		sendDshNotReady(res, requestLang(req));
 		return;
 	}
 	const authority = requestAuthority(req.headers);
@@ -980,7 +1035,7 @@ function proxyHttp(req, res) {
 	});
 	upstreamReq.on("error", (err) => {
 		log(`proxy error: ${err.message}`);
-		if (!res.headersSent) sendBadGateway(res);
+		if (!res.headersSent) sendBadGateway(res, requestLang(req));
 		else res.end();
 	});
 	req.pipe(upstreamReq);
@@ -1397,14 +1452,15 @@ function currentDomainHint(req) {
 	return "";
 }
 
-function setupPage({ error, username, domain, warnings, token }) {
+function setupPage({ error, username, domain, warnings, token, lang = "zh", req }) {
+	const L = translator(lang);
 	return `<!doctype html>
-<html lang="zh">
+<html lang="${lang === "zh" ? "zh-CN" : "en"}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>dsh-vps · 初始设置</title>
+<title>dsh-vps · ${L("初始设置", "Setup")}</title>
 <style>
 :root{color-scheme:dark}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -1427,36 +1483,38 @@ hr{border:0;border-top:1px solid #1f2733;margin:20px 0 4px}
 .chk input{width:auto;margin:2px 0 0;accent-color:#2563eb}
 .chk .tip{margin:2px 0 0;font-size:12px;color:#5c6b7e}
 ${REPO_CSS}
+${LANG_CSS}
 </style>
 </head>
 <body>
+${req ? langSwitch(req, lang) : ""}
 <main>
-<h1>dsh-vps 初始设置</h1>
-<p class="sub">DeepSeek Harness · 仅需填写以下几项</p>
+<h1>dsh-vps ${L("初始设置", "setup")}</h1>
+<p class="sub">DeepSeek Harness · ${L("仅需填写以下几项", "just a few fields")}</p>
 ${error ? `<p class="err">${esc(error)}</p>` : ""}
 ${(warnings || []).map((w) => `<p class="warn">${esc(w)}</p>`).join("")}
 <form method="post" action="/setup">
 ${token ? `<input type="hidden" name="token" value="${esc(token)}">` : ""}
-<label for="u">管理员用户名</label>
+<label for="u">${L("管理员用户名", "Admin username")}</label>
 <input id="u" name="username" value="${esc(username || "")}" autocomplete="username" required>
-<p class="hint">3-32 位字母、数字或下划线</p>
-<label for="p">管理员密码</label>
+<p class="hint">${L("3-32 位字母、数字或下划线", "3–32 letters, digits or underscores")}</p>
+<label for="p">${L("管理员密码", "Admin password")}</label>
 <input id="p" name="password" type="password" autocomplete="new-password" required>
-<label for="p2">确认密码</label>
+<label for="p2">${L("确认密码", "Confirm password")}</label>
 <input id="p2" name="password2" type="password" autocomplete="new-password" required>
-<p class="hint">至少 12 位</p>
+<p class="hint">${L("至少 12 位", "At least 12 characters")}</p>
 <hr>
-<label for="d">域名（可选）</label>
+<label for="d">${L("域名（可选）", "Domain (optional)")}</label>
 <input id="d" name="domain" value="${esc(domain || "")}" placeholder="dsh.example.com">
-<p class="hint">需已将 A 记录解析到本服务器；留空则沿用当前访问方式。Caddy 自动签发证书。</p>
-<label for="k">DeepSeek API Key（可选）</label>
+<p class="hint">${L("需已将 A 记录解析到本服务器；留空则沿用当前访问方式。Caddy 自动签发证书。", "Its A record must already point at this server; leave empty to keep the current address. Caddy issues the certificate automatically.")}</p>
+<label for="k">DeepSeek API Key${L("（可选）", " (optional)")}</label>
 <input id="k" name="apiKey" type="password" autocomplete="off" placeholder="sk-...">
-<p class="hint">现在填写最省事；跳过也可稍后在登录后的「添加 API Key」引导，或设置 → 模型 → DeepSeek 中填写。</p>
+<p class="hint">${L("现在填写最省事；跳过也可稍后在登录后的「添加 API Key」引导，或设置 → 模型 → DeepSeek 中填写。", "Easiest to fill in now; you can also add it later from the \"Add API key\" prompt after signing in, or under Settings → Models → DeepSeek.")}</p>
 <hr>
-<p class="hint" style="margin:2px 0 0">预置插件（默认全选，可取消；其余插件装好后随时在插件市场里自行安装）</p>
+<p class="hint" style="margin:2px 0 0">${L("预置插件（默认全选，可取消；其余插件装好后随时在插件市场里自行安装）", "Bundled plugins (pre-checked, optional ones can be unchecked; install anything else from the plugin market later)")}</p>
 ${PLUGIN_OPTIONS.map((o) => `
-<label class="chk"><input type="checkbox" name="plugin" value="${o.id}" checked${o.required ? " disabled" : ""}> <span>${esc(o.name)}<br><span class="tip">${esc(o.desc)}</span></span></label>`).join("")}
-<button type="submit">完成设置</button>
+<label class="chk"><input type="checkbox" name="plugin" value="${o.id}" checked${o.required ? " disabled" : ""}> <span>${esc(lang === "zh" ? o.name : o.nameEn || o.name)}<br><span class="tip">${esc(lang === "zh" ? o.desc : o.descEn || o.desc)}</span></span></label>`).join("")}
+<button type="submit">${L("完成设置", "Finish setup")}</button>
 </form>
 ${repoLink()}
 </main>
@@ -1465,14 +1523,15 @@ ${repoLink()}
 }
 
 /** 缺少/错误的启动令牌：不给向导表单，只告诉用户去哪里拿链接。 */
-function setupTokenPage() {
+function setupTokenPage(lang = "zh", req) {
+	const L = translator(lang);
 	return `<!doctype html>
-<html lang="zh">
+<html lang="${lang === "zh" ? "zh-CN" : "en"}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
-<title>dsh-vps · 需要启动令牌</title>
+<title>dsh-vps · ${L("需要启动令牌", "Setup token required")}</title>
 <style>
 :root{color-scheme:dark}
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -1484,16 +1543,18 @@ h1{margin:0 0 4px;font-size:20px;letter-spacing:.5px}
 .hint{margin:2px 0 0;font-size:12px;color:#5c6b7e}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 ${REPO_CSS}
+${LANG_CSS}
 </style>
 </head>
 <body>
+${req ? langSwitch(req, lang) : ""}
 <main>
-<h1>dsh-vps 初始设置</h1>
-<p class="sub">初始设置向导需要启动令牌</p>
-<p class="err">当前链接缺少启动令牌或令牌不正确。向导只对持有令牌的人开放。</p>
-<p style="font-size:14px;color:#9aa7b8;margin:0 0 4px">在服务器上执行下面的命令获取带令牌的链接：</p>
+<h1>dsh-vps ${L("初始设置", "setup")}</h1>
+<p class="sub">${L("初始设置向导需要启动令牌", "The setup wizard needs a setup token")}</p>
+<p class="err">${L("当前链接缺少启动令牌或令牌不正确。向导只对持有令牌的人开放。", "This link has no setup token, or the token is wrong. The wizard only answers to holders of the token.")}</p>
+<p style="font-size:14px;color:#9aa7b8;margin:0 0 4px">${L("在服务器上执行下面的命令获取带令牌的链接：", "Run this on the server to get the link with its token:")}</p>
 <p style="margin:6px 0 0"><code style="display:block;padding:9px 10px;border-radius:8px;background:#0d1219;color:#93c5fd;font-size:13px;overflow-x:auto">sudo dsh-vps setup-url</code></p>
-<p class="hint" style="margin:16px 0 0">安装结束时该链接已打印在终端里。</p>
+<p class="hint" style="margin:16px 0 0">${L("安装结束时该链接已打印在终端里。", "The link was also printed in the terminal when the install finished.")}</p>
 ${repoLink()}
 </main>
 </body>
@@ -1501,6 +1562,8 @@ ${repoLink()}
 }
 
 async function handleSetup(req, res) {
+	const lang = requestLang(req);
+	const L = translator(lang);
 	if (!setupOpen()) {
 		sendText(res, 404, "not found");
 		return;
@@ -1509,10 +1572,10 @@ async function handleSetup(req, res) {
 		const token = providedSetupToken(req, null);
 		if (!setupTokenValid(token)) {
 			log("setup page rejected: missing or wrong token");
-			sendHtml(res, 403, setupTokenPage());
+			sendHtml(res, 403, setupTokenPage(lang, req));
 			return;
 		}
-		sendHtml(res, 200, setupPage({ domain: currentDomainHint(req), token }));
+		sendHtml(res, 200, setupPage({ domain: currentDomainHint(req), token, lang, req }));
 		return;
 	}
 	if (req.method !== "POST") {
@@ -1531,12 +1594,12 @@ async function handleSetup(req, res) {
 	const token = providedSetupToken(req, form);
 	if (!setupTokenValid(token)) {
 		log("setup submit rejected: missing or wrong token");
-		sendHtml(res, 403, setupTokenPage());
+		sendHtml(res, 403, setupTokenPage(lang, req));
 		return;
 	}
 	const ip = clientIp(req);
 	if (setupRateLimited(ip)) {
-		sendHtml(res, 429, setupPage({ error: "尝试次数过多，请稍后再试。", token }));
+		sendHtml(res, 429, setupPage({ error: L("尝试次数过多，请稍后再试。", "Too many attempts. Try again later."), token, lang, req }));
 		return;
 	}
 	const username = String(form.get("username") || "").trim();
@@ -1553,12 +1616,12 @@ async function handleSetup(req, res) {
 
 	const redisplay = (error) => {
 		recordSetupFailure(ip);
-		sendHtml(res, 200, setupPage({ error, username, domain, token }));
+		sendHtml(res, 200, setupPage({ error, username, domain, token, lang, req }));
 	};
-	if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) return redisplay("用户名须为 3-32 位字母、数字或下划线。");
-	if (password.length < 12) return redisplay("密码至少 12 位。");
-	if (password !== password2) return redisplay("两次输入的密码不一致。");
-	if (domain && !DOMAIN_PATTERN.test(domain)) return redisplay("域名格式不合法。");
+	if (!/^[A-Za-z0-9_]{3,32}$/.test(username)) return redisplay(L("用户名须为 3-32 位字母、数字或下划线。", "The username must be 3–32 letters, digits or underscores."));
+	if (password.length < 12) return redisplay(L("密码至少 12 位。", "The password needs at least 12 characters."));
+	if (password !== password2) return redisplay(L("两次输入的密码不一致。", "The two passwords do not match."));
+	if (domain && !DOMAIN_PATTERN.test(domain)) return redisplay(L("域名格式不合法。", "That domain is not valid."));
 
 	log(`setup submitted from ${ip} (username=${username}, domain=${domain || "(unchanged)"}, apiKey=${apiKey ? "yes" : "no"})`);
 	writeAdminRecord(username, password);
@@ -1570,10 +1633,12 @@ async function handleSetup(req, res) {
 		} catch (err) {
 			log(`setup: domain change failed: ${err.message}`);
 			sendHtml(res, 200, setupPage({
-				error: `域名配置失败：${err.message}。管理员账号已保存，请修正后重新提交。`,
+				error: L(`域名配置失败：${err.message}。管理员账号已保存，请修正后重新提交。`, `Domain setup failed: ${err.message}. The admin account was saved; fix it and submit again.`),
 				username,
 				domain,
 				token,
+				lang,
+				req,
 			}));
 			return;
 		}
@@ -1585,7 +1650,7 @@ async function handleSetup(req, res) {
 			log("setup: api key written via credentials/set");
 		} catch (err) {
 			log(`setup: api key write failed: ${err.message}`);
-			warnings.push(`API Key 写入失败：${err.message}。不影响登录，可稍后在原生设置页填写。`);
+			warnings.push(L(`API Key 写入失败：${err.message}。不影响登录，可稍后在原生设置页填写。`, `Could not save the API key: ${err.message}. Signing in is unaffected; add it later in the DSH settings.`));
 		}
 	}
 
@@ -1599,7 +1664,7 @@ async function handleSetup(req, res) {
 	}
 
 	if (warnings.length) {
-		sendHtml(res, 200, setupPage({ warnings, username, domain, token }));
+		sendHtml(res, 200, setupPage({ warnings, username, domain, token, lang, req }));
 		return;
 	}
 	if (domain && domain !== requestAuthority(req.headers)) {
@@ -1607,13 +1672,13 @@ async function handleSetup(req, res) {
 		sendHtml(
 			res,
 			200,
-			`<!doctype html><meta charset="utf-8"><title>dsh-vps · 设置完成</title>
+			`<!doctype html><html lang="${lang === "zh" ? "zh-CN" : "en"}"><meta charset="utf-8"><title>dsh-vps · ${L("设置完成", "Setup complete")}</title>
 <body style="background:#0b0e14;color:#dbe2ea;font:15px system-ui;display:flex;min-height:100vh;align-items:center;justify-content:center">
 <div style="max-width:420px;padding:32px;border:1px solid #1f2733;border-radius:12px;background:#11161f">
-<h2 style="margin-top:0">设置完成</h2>
-<p>请在新地址打开并登录：</p>
+<h2 style="margin-top:0">${L("设置完成", "Setup complete")}</h2>
+<p>${L("请在新地址打开并登录：", "Open the new address and sign in:")}</p>
 <p><a href="https://${esc(domain)}/" style="color:#60a5fa">https://${esc(domain)}/</a></p>
-<p style="color:#7d8a9c;font-size:13px">证书签发需要几十秒；若暂不可访问请稍候重试。</p>
+<p style="color:#7d8a9c;font-size:13px">${L("证书签发需要几十秒；若暂不可访问请稍候重试。", "Issuing the certificate takes a few tens of seconds; if it does not open yet, retry shortly.")}</p>
 </div></body>`,
 		);
 		return;
@@ -1962,6 +2027,19 @@ function main() {
 		const pathname = (req.url || "/").split("?")[0];
 		Promise.resolve()
 			.then(async () => {
+				// 页面右上角的语言切换：记进 Cookie，再回到去掉 lang 参数的同一地址（向导令牌等其余参数保留）
+				if ((req.method === "GET" || req.method === "HEAD") && /[?&]lang=(zh|en)(?:&|$)/.test(req.url || "")) {
+					const url = new URL(req.url, "http://x");
+					const chosen = url.searchParams.get("lang");
+					url.searchParams.delete("lang");
+					res.writeHead(303, {
+						location: url.pathname + url.search,
+						"set-cookie": `${LANG_COOKIE}=${chosen}; Max-Age=31536000; Path=/; SameSite=Lax`,
+						"cache-control": "no-store",
+					});
+					res.end();
+					return;
+				}
 				if (pathname === "/login") return handleLogin(req, res);
 				if (pathname === "/logout") return handleLogout(req, res);
 				if (pathname === "/gate/health") return handleHealthGuarded(req, res);

@@ -51,6 +51,7 @@ dsh-vps puts a zero-dependency login gateway (dsh-gate) in front of DSH: public 
 | Two ways to install | fill in a form and click install from the DSH on your own computer (Mac / Windows / Linux), or run one `curl \| bash` on the VPS; then it runs as a systemd service, started on boot |
 | Login gate | scrypt password + HMAC session cookie + rate limiting |
 | Browser setup wizard | admin account, domain, DeepSeek API key and bundled plugins — all filled in from the browser |
+| Chinese and English | the sign-in page, setup wizard and startup page follow the browser language, with a switch in the top-right corner that is remembered; the VPS Deploy page and upgrade prompt inside DSH follow the DSH language setting |
 | One-time setup token | the wizard only answers to holders of the token; the link is printed at install time, re-printable, and voided once setup completes |
 | One-click bundled plugins | 3 shipped in the wizard: this project's settings page dsh-vps (required), plus the plugin market and VPS manager (pre-checked, optional); installed in the background and activated by an automatic restart |
 | Automatic HTTPS | Caddy issues and renews certificates; changing the domain in the wizard hot-reloads instantly |
