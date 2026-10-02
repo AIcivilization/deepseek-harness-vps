@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
-const RAW_BASE = 'https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main'
+const RAW_BASE = 'https://raw.githubusercontent.com/AIcivilization/dsh-vps/main'
 const ACTIONS = {
   install: { script: `${RAW_BASE}/install.sh`, log: '/var/log/dsh-vps-install.log' },
   uninstall: { script: `${RAW_BASE}/uninstall.sh`, log: '/var/log/dsh-vps-uninstall.log' },

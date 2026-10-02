@@ -2,7 +2,7 @@
 # dsh-vps 一键安装脚本（M2）
 #
 # 用法：
-#   curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
+#   curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh \
 #     | sudo bash -s -- --domain dsh.example.com
 #   # 或在仓库克隆目录内：
 #   sudo bash install.sh --domain dsh.example.com [--mirror cn]
@@ -33,7 +33,7 @@ DSH_HOME_DIR="/home/dsh/.dsh"
 GATE_PORT=3100
 DSH_PORT=3080
 # gate/unit/caddy 模板来源：优先脚本同目录（仓库克隆），否则从 raw 地址下载
-RAW_BASE="${DSHVPS_RAW_BASE:-https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main}"
+RAW_BASE="${DSHVPS_RAW_BASE:-https://raw.githubusercontent.com/AIcivilization/dsh-vps/main}"
 
 DOMAIN=""
 MIRROR=""

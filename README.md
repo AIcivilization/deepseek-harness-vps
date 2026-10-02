@@ -2,21 +2,21 @@
 
 <img src="assets/logo.png" width="128" alt="dsh-vps 标志">
 
-# deepseek-harness-vps
+# dsh-vps
 
 <p><strong>把 DeepSeek Harness 装进你的 VPS：一条命令，公网可达，界面原样</strong></p>
 <p><strong>Your DeepSeek Harness on your own VPS — one command, reachable from anywhere, native UI intact</strong></p>
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/deepseek-harness-vps" alt="MIT 许可证"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/dsh-vps" alt="MIT 许可证"></a>
   <a href="https://www.npmjs.com/package/dsh-vps"><img src="https://img.shields.io/npm/v/dsh-vps" alt="npm 版本"></a>
   <img src="https://img.shields.io/badge/platform-Ubuntu%2022.04%2B%20%2F%20Debian%2012%2B-blue" alt="平台：Ubuntu 22.04+ / Debian 12+">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.7--rc.1-4176E6" alt="DeepSeek Harness 0.1.7-rc.1">
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="运行时依赖：0">
   <img src="https://img.shields.io/badge/Docker-not%20required-orange" alt="无需 Docker">
-  <img src="https://img.shields.io/github/stars/AIcivilization/deepseek-harness-vps?style=social" alt="star">
-  <a href="https://awesome-dsh-plugin.com/p/AIcivilization/deepseek-harness-vps/"><img src="https://img.shields.io/badge/Listed_on-awesome--dsh--plugin-1677ff?style=flat-square" alt="已收录于 awesome-dsh-plugin"></a>
-  <a href="https://dshget.com/plugins/AIcivilization/deepseek-harness-vps"><img src="https://img.shields.io/badge/Listed_on-DSH_Get-1677ff?style=flat-square" alt="已收录于 DSH Get"></a>
+  <img src="https://img.shields.io/github/stars/AIcivilization/dsh-vps?style=social" alt="star">
+  <a href="https://awesome-dsh-plugin.com/p/AIcivilization/dsh-vps/"><img src="https://img.shields.io/badge/Listed_on-awesome--dsh--plugin-1677ff?style=flat-square" alt="已收录于 awesome-dsh-plugin"></a>
+  <a href="https://dshget.com/plugins/AIcivilization/dsh-vps"><img src="https://img.shields.io/badge/Listed_on-DSH_Get-1677ff?style=flat-square" alt="已收录于 DSH Get"></a>
 </p>
 
 <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
@@ -32,7 +32,7 @@
 **② 在 VPS 上执行一键安装命令**：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s
 ```
 
 有域名、在国内网络时，在末尾追加参数，例如 `bash -s -- --domain dsh.example.com --mirror cn`，详见下方[安装](#安装)。
@@ -125,21 +125,21 @@ Mac、Windows、Linux 上的 DSH 都可以：
 ### 方式二：在 VPS 上执行一键安装命令
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com
 ```
 
 国内网络加 `--mirror cn`（Node 与 DSH 走 npmmirror）：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com --mirror cn
 ```
 
 还没有域名？去掉 `--domain` 即可，按公网 IP 访问：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s
 ```
 
 此时证书由 Caddy 内置 CA 自签，浏览器会提示「不安全 / 证书不受信任」，属预期现象，选择继续访问即可。之后在向导里填上域名，Caddy 自动换成正式证书。（方式一不填域名时也是这样。）
@@ -153,8 +153,8 @@ npx dsh-vps-install install --domain dsh.example.com
 想固定在某个发布版本（而非 `main`），把地址里的 `main` 换成版本 tag，并让后续拉取的网关文件也用同一版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0/install.sh \
-  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0 bash -s -- --domain dsh.example.com
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/v1.7.0/install.sh \
+  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/dsh-vps/v1.7.0 bash -s -- --domain dsh.example.com
 ```
 
 安装末尾的自检若报「DSH 尚未就绪」，设置链接照样会打印；页面会显示启动进度与具体错误，排障见 `journalctl -u dsh-gate -n 80 --no-pager`。
@@ -180,7 +180,7 @@ v1.5.0 之前安装的机器，重跑一次上方的一键安装命令即可获�
 ## 卸载
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh \
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/uninstall.sh \
   | sudo bash -s -- --yes
 ```
 

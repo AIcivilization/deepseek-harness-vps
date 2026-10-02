@@ -2,20 +2,20 @@
 
 <img src="assets/logo.png" width="128" alt="dsh-vps logo">
 
-# deepseek-harness-vps
+# dsh-vps
 
 <p><strong>Your DeepSeek Harness on your own VPS — one command, reachable from anywhere, native UI intact</strong></p>
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/deepseek-harness-vps" alt="MIT license"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/AIcivilization/dsh-vps" alt="MIT license"></a>
   <a href="https://www.npmjs.com/package/dsh-vps"><img src="https://img.shields.io/npm/v/dsh-vps" alt="npm version"></a>
   <img src="https://img.shields.io/badge/platform-Ubuntu%2022.04%2B%20%2F%20Debian%2012%2B-blue" alt="Platform: Ubuntu 22.04+ / Debian 12+">
   <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.7--rc.1-4176E6" alt="DeepSeek Harness 0.1.7-rc.1">
   <img src="https://img.shields.io/badge/runtime%20dependencies-0-brightgreen" alt="Runtime dependencies: 0">
   <img src="https://img.shields.io/badge/Docker-not%20required-orange" alt="No Docker required">
-  <img src="https://img.shields.io/github/stars/AIcivilization/deepseek-harness-vps?style=social" alt="star">
-  <a href="https://awesome-dsh-plugin.com/p/AIcivilization/deepseek-harness-vps/"><img src="https://img.shields.io/badge/Listed_on-awesome--dsh--plugin-1677ff?style=flat-square" alt="Listed on awesome-dsh-plugin"></a>
-  <a href="https://dshget.com/plugins/AIcivilization/deepseek-harness-vps"><img src="https://img.shields.io/badge/Listed_on-DSH_Get-1677ff?style=flat-square" alt="Listed on DSH Get"></a>
+  <img src="https://img.shields.io/github/stars/AIcivilization/dsh-vps?style=social" alt="star">
+  <a href="https://awesome-dsh-plugin.com/p/AIcivilization/dsh-vps/"><img src="https://img.shields.io/badge/Listed_on-awesome--dsh--plugin-1677ff?style=flat-square" alt="Listed on awesome-dsh-plugin"></a>
+  <a href="https://dshget.com/plugins/AIcivilization/dsh-vps"><img src="https://img.shields.io/badge/Listed_on-DSH_Get-1677ff?style=flat-square" alt="Listed on DSH Get"></a>
 </p>
 
 <p><a href="README.md">简体中文</a> · <strong>English</strong></p>
@@ -31,7 +31,7 @@
 **② With one command on the VPS**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s
 ```
 
 With a domain, or behind the GFW, append arguments at the end, e.g. `bash -s -- --domain dsh.example.com --mirror cn`. See [Install](#install) below.
@@ -120,7 +120,7 @@ Works with DSH on Mac, Windows and Linux:
 ### Option 2: run one command on the VPS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com
 ```
 
@@ -129,7 +129,7 @@ Add `--mirror cn` if you're behind the GFW (Node and DSH come from npmmirror).
 No domain yet? Drop `--domain` and use the public IP:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s
 ```
 
 The certificate then comes from Caddy's internal CA, so the browser warns "Not secure / certificate not trusted". That is expected — proceed anyway. Add a domain in the wizard later and Caddy switches to a real certificate. (The same applies to option 1 without a domain.)
@@ -143,8 +143,8 @@ npx dsh-vps-install install --domain dsh.example.com
 To pin a release instead of `main`, replace `main` with the version tag and point later gateway fetches at the same tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0/install.sh \
-  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.7.0 bash -s -- --domain dsh.example.com
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/v1.7.0/install.sh \
+  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/dsh-vps/v1.7.0 bash -s -- --domain dsh.example.com
 ```
 
 If the final self-check reports that DSH is not ready yet, the setup link is still printed; the page shows startup progress and the actual error. Troubleshoot with `journalctl -u dsh-gate -n 80 --no-pager`.
@@ -170,7 +170,7 @@ Machines installed before v1.5.0: run the one-command install above once more to
 ## Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh \
+curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/uninstall.sh \
   | sudo bash -s -- --yes
 ```
 

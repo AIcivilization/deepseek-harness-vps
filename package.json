@@ -1,6 +1,6 @@
 {
   "name": "dsh-vps",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "description": "Ship DeepSeek Harness to your own VPS: one command (or a form in DSH Settings → VPS Deploy) installs a zero-dependency login gateway, automatic HTTPS through Caddy, systemd supervision and one-click DSH upgrades.",
   "keywords": [
     "deepseek-harness",
@@ -25,12 +25,12 @@
     "llm"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/AIcivilization/deepseek-harness-vps#readme",
+  "homepage": "https://github.com/AIcivilization/dsh-vps#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AIcivilization/deepseek-harness-vps.git"
+    "url": "git+https://github.com/AIcivilization/dsh-vps.git"
   },
-  "bugs": "https://github.com/AIcivilization/deepseek-harness-vps/issues",
+  "bugs": "https://github.com/AIcivilization/dsh-vps/issues",
   "main": "./plugin/index.mjs",
   "exports": {
     ".": "./plugin/index.mjs",

@@ -2313,8 +2313,8 @@ window.__ModuleLoader__.load({
 
     }();
 
-    const REPO = 'https://github.com/AIcivilization/deepseek-harness-vps'
-    const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s'
+    const REPO = 'https://github.com/AIcivilization/dsh-vps'
+    const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s'
 
     // ——————————————————————— 文案 ———————————————————————
 
@@ -2818,7 +2818,7 @@ window.__ModuleLoader__.load({
             'Needs root and open ports 80/443. It prints a setup link with a one-time token at the end; open it to create the admin account.'))))
     }
 
-    const UNINSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh | sudo bash -s -- --yes --keep-data'
+    const UNINSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/uninstall.sh | sudo bash -s -- --yes --keep-data'
 
     function InstallProgress({ job, onReset }) {
       const logRef = useRef(null)

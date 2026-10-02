@@ -143,7 +143,7 @@ node scripts/check-catalog.mjs        # 八项收录条件自检
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hrhgit/deepseek-harness-plugin-manager/main/catalog/v2/catalog.json \
   | python3 -c "import json,sys; d=json.load(sys.stdin); \
-  print([e for e in d['entries'] if 'deepseek-harness-vps' in e['repositoryFullName']])"
+  print([e for e in d['entries'] if 'dsh-vps' in e['repositoryFullName']])"
 ```
 
 期望看到 `availability: available`。

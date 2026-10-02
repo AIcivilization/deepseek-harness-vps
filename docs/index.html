@@ -8,7 +8,7 @@
 <meta property="og:type" content="website">
 <meta property="og:title" content="dsh-vps · 把 DeepSeek Harness 装进你的 VPS">
 <meta property="og:description" content="一条命令，公网可达，界面原样：零依赖登录网关架在 DSH 前面，自动 HTTPS、开机自启、升级失败自动回滚。">
-<meta property="og:image" content="https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/docs/screenshots/07-dsh.png">
+<meta property="og:image" content="https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/docs/screenshots/07-dsh.png">
 <meta name="theme-color" content="#4176E6">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234176E6'/%3E%3Cpath d='M9 11.5h14M9 16h14M9 20.5h9' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
@@ -169,7 +169,7 @@
       <a href="#commands">管理命令</a>
       <a href="#faq">FAQ</a>
     </div>
-    <a class="btn-gh" href="https://github.com/AIcivilization/deepseek-harness-vps">
+    <a class="btn-gh" href="https://github.com/AIcivilization/dsh-vps">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-2.91-.88-2.91-2.9 0-.86.31-1.57.82-2.12-.06-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.14 1.92.08 2.12.51.55.82 1.25.82 2.12 0 2.03-1.14 2.7-2.92 2.9.3.26.56.76.56 1.54 0 1.11-.01 2-.01 2.27 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       GitHub
     </a>
@@ -197,12 +197,12 @@
 
     <div class="cmd">
       <button class="copy" type="button">复制</button>
-      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s</code>
+      <code><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s</code>
     </div>
     <p class="hint">有域名、或在国内网络，末尾追加参数：<code>--domain dsh.example.com --mirror cn</code></p>
 
     <div class="cta">
-      <a class="btn btn-p" href="https://github.com/AIcivilization/deepseek-harness-vps">查看源码与文档</a>
+      <a class="btn btn-p" href="https://github.com/AIcivilization/dsh-vps">查看源码与文档</a>
       <a class="btn btn-s" href="https://www.npmjs.com/package/dsh-vps">npm: dsh-vps</a>
     </div>
   </div>
@@ -271,19 +271,19 @@
       </div>
 
       <div class="panel on" id="p-domain">
-        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
+        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com</code></div>
         <p>把 <code>dsh.example.com</code> 换成你的域名，并先把它的 A 记录解析到这台机器。</p>
       </div>
 
       <div class="panel" id="p-cn">
-        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh \
+        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh \
   | sudo bash -s -- --domain dsh.example.com --mirror cn</code></div>
         <p>加 <code>--mirror cn</code> 后，Node 与 DSH 走 npmmirror。</p>
       </div>
 
       <div class="panel" id="p-ip">
-        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s</code></div>
+        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s</code></div>
         <p>证书由 Caddy 内置 CA 自签，浏览器会提示「不安全 / 证书不受信任」，属预期现象，选择继续访问即可。之后在向导里填上域名，Caddy 自动换成正式证书。</p>
       </div>
 
@@ -293,13 +293,13 @@
       </div>
 
       <div class="panel" id="p-pin">
-        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3/install.sh \
-  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/v1.4.3 bash -s -- --domain dsh.example.com</code></div>
+        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/v1.4.3/install.sh \
+  | sudo DSHVPS_RAW_BASE=https://raw.githubusercontent.com/AIcivilization/dsh-vps/v1.4.3 bash -s -- --domain dsh.example.com</code></div>
         <p>把地址里的 <code>main</code> 换成版本 tag，并让后续拉取的网关文件也用同一版本。</p>
       </div>
 
       <div class="panel" id="p-remove">
-        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh \
+        <div class="cmd"><button class="copy" type="button">复制</button><code>curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/uninstall.sh \
   | sudo bash -s -- --yes</code></div>
         <p>删除服务、安装目录、Caddy 站点块与 DSH 数据目录，删除前打包备份（含 Caddyfile）到 <code>/root/dsh-vps-uninstall-&lt;时间戳&gt;.tar.gz</code>。<code>--keep-data</code> 保留 DSH 数据，<code>--purge-caddy</code> 连 Caddy 一起移除。</p>
       </div>
@@ -449,8 +449,8 @@ sudo dsh-vps tunnel        # 零安装备选：SSH 本地端口转发用法</cod
   <div class="wrap foot">
     <div>MIT 许可 · 社区项目，与 DeepSeek 官方无隶属关系</div>
     <div class="foot-links">
-      <a href="https://github.com/AIcivilization/deepseek-harness-vps">GitHub</a>
-      <a href="https://github.com/AIcivilization/deepseek-harness-vps/issues">提 issue</a>
+      <a href="https://github.com/AIcivilization/dsh-vps">GitHub</a>
+      <a href="https://github.com/AIcivilization/dsh-vps/issues">提 issue</a>
       <a href="https://www.npmjs.com/package/dsh-vps">npm</a>
       <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
     </div>

@@ -2,7 +2,7 @@
 # dsh-vps 卸载脚本
 #
 # 用法：
-#   curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/uninstall.sh \
+#   curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/uninstall.sh \
 #     | sudo bash -s -- --yes
 #   # 或在仓库克隆目录内：
 #   sudo bash uninstall.sh [--yes] [--keep-data] [--purge-caddy]
@@ -195,5 +195,5 @@ cat <<EOF
 卸载完成。
   备份：${BACKUP:-（无）}
 重装：
-  curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s -- --domain <你的域名> --mirror cn
+  curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s -- --domain <你的域名> --mirror cn
 EOF

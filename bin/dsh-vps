@@ -28,7 +28,7 @@ HEALTH_URL="http://127.0.0.1:$GATE_PORT/gate/health"
 SELFCHECK_URL="http://127.0.0.1:$GATE_PORT/gate/selfcheck"
 DSH_HOME_DIR="${DSH_HOME:-/home/dsh/.dsh}"
 SERVICE="dsh-gate"
-RAW_BASE="${DSHVPS_RAW_BASE:-https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main}"
+RAW_BASE="${DSHVPS_RAW_BASE:-https://raw.githubusercontent.com/AIcivilization/dsh-vps/main}"
 VERSIONS_URL="${DSHVPS_VERSIONS_URL:-$RAW_BASE/versions.json}"
 # 依赖解析冻结时间点的兜底值（版本表里带 resolve_before 时以版本表为准）。
 # 只钉顶层包版本不够：DSH 子包依赖是 ^x 浮动范围，上游发新预发布波次时解析结果会整体漂上去

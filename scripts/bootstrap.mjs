@@ -18,7 +18,7 @@ const usage = `dsh-vps-install — 用 npm 包里的脚本安装/卸载 dsh-vps
   npx dsh-vps-install uninstall [--yes]
 
 等价的传统方式（不需要 npm）:
-  curl -fsSL https://raw.githubusercontent.com/AIcivilization/deepseek-harness-vps/main/install.sh | sudo bash -s -- --domain <域名>
+  curl -fsSL https://raw.githubusercontent.com/AIcivilization/dsh-vps/main/install.sh | sudo bash -s -- --domain <域名>
 `
 
 const args = process.argv.slice(2)

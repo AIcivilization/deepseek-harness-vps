@@ -62,8 +62,8 @@ const PLUGIN_OPTIONS = [
 const PLUGIN_ENV = { pnpm_config_minimum_release_age: "0" };
 // 本产品仓库入口：放在 gate 自己的页面（登录 / 初始向导 / 启动等待），
 // 不碰 DSH 原生界面，DSH 升级不受影响。
-const REPO_URL = "https://github.com/AIcivilization/deepseek-harness-vps";
-const REPO_LABEL = "AIcivilization/deepseek-harness-vps";
+const REPO_URL = "https://github.com/AIcivilization/dsh-vps";
+const REPO_LABEL = "AIcivilization/dsh-vps";
 // 内联 GitHub 图标，不依赖外部 CDN，离线也能显示
 const REPO_ICON =
 	'<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +

@@ -15,7 +15,7 @@ const ok = b => (b ? '[OK]  ' : '[缺]  ')
 const root = process.env.DSHVPS_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(root + '/package.json', 'utf8'))
 const canonicalFrom = v => String(v || '').replace(/^git\+/, '').replace(/\.git$/, '').toLowerCase()
-const expected = 'https://github.com/aicivilization/deepseek-harness-vps'
+const expected = 'https://github.com/aicivilization/dsh-vps'
 
 console.log('== DSH 目录站（catalog/v2）收录自检 ==')
 const nameOk = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(pkg.name)
@@ -28,7 +28,7 @@ console.log(ok(versionOk) + 'version 为精确 semver: ' + pkg.version)
 console.log(ok(homepageOk) + 'homepage 是合法 URL')
 console.log(ok(canonicalFrom(pkg.repository?.url) === expected) + 'repository 归一化为仓库地址')
 
-const gh = await get('https://api.github.com/repos/AIcivilization/deepseek-harness-vps')
+const gh = await get('https://api.github.com/repos/AIcivilization/dsh-vps')
 const g = JSON.parse(gh.body)
 const topics = g.topics ?? []
 console.log(ok(topics.includes('dsh-plugin')) + 'GitHub 主题含 dsh-plugin（当前: ' + (topics.length ? topics.join(', ') : '无') + '）')
