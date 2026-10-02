@@ -479,13 +479,11 @@ step9_verify() {
 	fi
 	echo " 服务/日志 : systemctl status dsh-gate | journalctl -u dsh-gate -f"
 	echo " 管理命令  : dsh-vps status | restart | upgrade | rollback | reset-admin | setup-url | backup"
-	echo " 仅我可访问: dsh-vps vpn setup（隧道）| dsh-vps tunnel（SSH 转发，零安装）"
 	echo "------------------------------------------------------------"
 	echo " 下一步："
 	echo " 1. 若使用域名，请先将 A 记录解析到本机（Caddy 会自动签发证书）"
 	echo " 2. 浏览器打开上面的访问地址，进入初始设置向导"
 	echo " 3. 填写管理员用户名/密码（+ 可选域名、DeepSeek API Key）→ 登录"
-	echo " 4. 可选：sudo dsh-vps vpn setup —— 之后公网访问不到登录页，只有隧道内的设备能进"
 	if [[ -n "$SETUP_TOKEN" ]]; then
 		echo
 		echo " 令牌只此一份，链接丢了随时重取：sudo dsh-vps setup-url"

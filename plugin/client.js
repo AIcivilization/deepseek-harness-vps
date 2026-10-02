@@ -2679,7 +2679,6 @@ window.__ModuleLoader__.load({
         ['sudo dsh-vps status', t('服务状态、版本、健康检查', 'services, versions and health')],
         ['sudo dsh-vps backup', t('备份 DSH 数据与网关配置（保留最近 3 份）', 'back up DSH data and gateway config (keeps the last 3)')],
         ['sudo dsh-vps rollback', t('切回上一个 DSH 版本', 'switch back to the previous DSH version')],
-        ['sudo dsh-vps vpn setup <设备名>'.replace('<设备名>', t('<设备名>', '<device>')), t('改为仅 WireGuard 隧道可访问', 'restrict access to a WireGuard tunnel')],
         ['sudo dsh-vps update-gate', t('更新网关（登录页、代理）自身', 'update the gateway itself (login page, proxy)')],
         ['sudo dsh-vps reset-admin', t('忘记管理员密码时重置', 'reset a forgotten admin password')],
       ]

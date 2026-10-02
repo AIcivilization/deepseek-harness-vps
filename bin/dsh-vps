@@ -10,8 +10,8 @@
 #   rollback            符号链接切回上一版本并重启
 #   reset-admin         删除 admin.json 与 setup.lock，重新走向导并换发令牌（应急）
 #   setup-url           打印初始设置链接（含一次性令牌）
-#   vpn                 仅我可访问：WireGuard 隧道（setup/add/revoke/list/status/on/off）
-#   tunnel              仅我可访问：SSH 本地端口转发（零安装，打印用法）
+#   vpn                 仅我可访问：WireGuard 隧道（setup/add/revoke/list/status/on/off）——保留但不在帮助里列出
+#   tunnel              仅我可访问：SSH 本地端口转发（零安装，打印用法）——保留但不在帮助里列出
 #   backup              打包 DSH_HOME + state 到 backups/（保留最近 3 份）
 #   selfcheck           手动触发升级回归自检探针
 #   install-units       安装浏览器一键升级所需的 systemd 单元（install.sh / update-gate 调用）
@@ -1052,8 +1052,6 @@ dsh-vps 管理命令
   setup-url          打印初始设置链接（含一次性令牌）
   backup              备份数据到 /opt/dsh-vps/backups/（保留 3 份）
   selfcheck           手动触发回归自检探针
-  vpn ...             仅我可访问：WireGuard 隧道（setup/add/revoke/list/status/on/off）
-  tunnel             仅我可访问：SSH 本地端口转发（零安装，打印用法）
 EOF
 }
 
