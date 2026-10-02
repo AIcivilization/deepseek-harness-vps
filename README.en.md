@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" width="128" alt="dsh-vps logo">
+
 # deepseek-harness-vps
 
 <p><strong>Your DeepSeek Harness on your own VPS — one command, reachable from anywhere, native UI intact</strong></p>

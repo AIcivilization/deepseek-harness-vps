@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" width="128" alt="dsh-vps 标志">
+
 # deepseek-harness-vps
 
 <p><strong>把 DeepSeek Harness 装进你的 VPS：一条命令，公网可达，界面原样</strong></p>
